@@ -3,8 +3,48 @@ import test from "node:test";
 
 import {
   buildOTPDirectLink,
+  buildRecentMailDirectLink,
+  getOTPOrigin,
+  normalizeOTPOrigin,
+  setOTPOrigin,
   copyText,
 } from "../src/utils/clipboard.js";
+import { buildAliasExportLine } from "../src/utils/aliasExport.js";
+import { buildProjectMailboxExportText } from "../src/utils/projectMailboxExport.js";
+
+test("custom OTP domain applies to links and exports and can be cleared", (t) => {
+  const data = new Map();
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: (key) => data.get(key) ?? null,
+    setItem: (key, value) => data.set(key, value),
+    removeItem: (key) => data.delete(key),
+  } });
+  t.after(() => {
+    if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor);
+    else delete globalThis.localStorage;
+  });
+  const origin = "https://admin.example.test";
+  const path = "/api/v1/otp?token=derived_a%2Bb%2Fc";
+  assert.equal(setOTPOrigin(" https://OTP.example.test/ "), "https://otp.example.test");
+  assert.equal(buildOTPDirectLink(path, origin), `https://otp.example.test${path}`);
+  assert.equal(buildAliasExportLine({ address: "a@example.test", otpUrlPath: path }, "otp", origin), `a@example.test-----https://otp.example.test${path}`);
+  assert.equal(buildProjectMailboxExportText([{ address: "a@example.test", otp_url_path: path }], origin), `a@example.test-----https://otp.example.test${path}`);
+  assert.equal(buildRecentMailDirectLink("/api/v1/mail/recent?api_key=legacy", origin), `${origin}/api/v1/mail/recent?api_key=legacy`);
+  assert.throws(() => setOTPOrigin("https://bad.example/path"));
+  assert.equal(getOTPOrigin(origin), "https://otp.example.test");
+  assert.equal(setOTPOrigin(" "), "");
+  assert.equal(buildOTPDirectLink(path, origin), `${origin}${path}`);
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("denied"); } });
+  assert.equal(buildOTPDirectLink(path, origin), `${origin}${path}`);
+  assert.throws(() => setOTPOrigin("https://otp.example.test"), /denied/);
+});
+
+test("OTP domains reject credentials, insecure schemes, paths and parameters", () => {
+  for (const value of ["http://otp.example.test", "javascript:alert(1)", "https://user:password@otp.example.test", "https://otp.example.test/api/v1/otp", "https://otp.example.test?token=secret", "https://otp.example.test#fragment", "otp.example.test"]) {
+    assert.throws(() => normalizeOTPOrigin(value));
+  }
+});
 
 function fallbackDocument(copyResult = true) {
   const state = { appended: null, commands: [] };

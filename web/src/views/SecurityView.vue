@@ -62,11 +62,19 @@
         </el-button>
       </div>
     </el-form>
+    <SectionHeader title="OTP 取码域名" description="仅保存在当前浏览器、当前后台域名下；留空时使用当前后台域名。请填写你控制且已配置 OTP 路由的 HTTPS 域名。" />
+    <el-form class="form-panel" label-position="top" @submit.prevent="saveOTPDomain">
+      <el-form-item label="取码域名">
+        <el-input v-model="otpDomain" placeholder="https://otp.example.com" />
+      </el-form-item>
+      <el-button native-type="submit" type="primary">保存取码域名</el-button>
+    </el-form>
   </section>
 </template>
 
 <script setup>
 import { Lock } from "@element-plus/icons-vue";
+import { ElMessage } from "element-plus";
 import { computed, nextTick, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -76,6 +84,24 @@ import SectionHeader from "../components/SectionHeader.vue";
 import { useAuth } from "../stores/auth.js";
 import { createActionLock } from "../utils/asyncState.js";
 import { utf8Length } from "../utils/format.js";
+import { getOTPOrigin, normalizeOTPOrigin, setOTPOrigin } from "../utils/clipboard.js";
+
+const otpDomain = ref(getOTPOrigin(""));
+function saveOTPDomain() {
+  let origin;
+  try {
+    origin = normalizeOTPOrigin(otpDomain.value);
+  } catch {
+    ElMessage.error("请输入有效的 HTTPS 域名，不包含路径或参数。");
+    return;
+  }
+  try {
+    otpDomain.value = setOTPOrigin(origin);
+    ElMessage.success("取码域名已保存");
+  } catch {
+    ElMessage.error("浏览器无法保存设置，请检查网站存储权限后重试。");
+  }
+}
 
 const router = useRouter();
 const auth = useAuth();

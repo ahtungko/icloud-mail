@@ -568,7 +568,7 @@ import { mergePoolPageSelection, poolAliasSelectable, submitPoolEnrollment } fro
 import { useAuth } from "../stores/auth.js";
 import SectionHeader from "../components/SectionHeader.vue";
 import RequestAlert from "../components/RequestAlert.vue";
-import { copyText } from "../utils/clipboard.js";
+import { buildOTPDirectLink, copyText } from "../utils/clipboard.js";
 import { createCheckboxDragSelection } from "../utils/checkboxDragSelection.js";
 import { buildProjectMailboxExportText, buildProjectMailboxFilename, collectProjectMailboxes } from "../utils/projectMailboxExport.js";
 
@@ -1144,7 +1144,7 @@ async function showCredentials(id) {
       imap_password: a.imap_password,
       client_id: a.client_id,
       refresh_token: a.refresh_token,
-      otp_url: new URL(a.otp_url_path, location.origin).href,
+      otp_url: buildOTPDirectLink(a.otp_url_path, location.origin),
     });
   });
 }

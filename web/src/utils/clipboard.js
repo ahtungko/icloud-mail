@@ -1,4 +1,30 @@
 const OTP_PATH = "/api/v1/otp";
+const OTP_ORIGIN_KEY = "icloud-api-otp-origin";
+
+export function normalizeOTPOrigin(value) {
+  const input = value.trim();
+  if (!input) return "";
+  const url = new URL(input);
+  if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new TypeError("请输入 HTTPS 域名，不包含路径、账号或参数。");
+  }
+  return url.origin;
+}
+
+export function getOTPOrigin(fallback = globalThis.location?.origin) {
+  try {
+    return normalizeOTPOrigin(globalThis.localStorage?.getItem(OTP_ORIGIN_KEY) || "") || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setOTPOrigin(value) {
+  const origin = normalizeOTPOrigin(value);
+  if (origin) globalThis.localStorage.setItem(OTP_ORIGIN_KEY, origin);
+  else globalThis.localStorage.removeItem(OTP_ORIGIN_KEY);
+  return origin;
+}
 const LEGACY_RECENT_MAIL_PATHS = new Set([
   "/api/v1/mail/recent",
   "/api/v1/mail/recent/",
@@ -48,6 +74,7 @@ export function buildRecentMailDirectLink(relativePath, origin = globalThis.loca
 }
 
 export function buildOTPDirectLink(relativePath, origin = globalThis.location?.origin) {
+  origin = getOTPOrigin(origin);
   if (
     typeof relativePath !== "string" ||
     relativePath !== relativePath.trim() ||
