@@ -156,8 +156,11 @@ type Alias struct {
 	LastAccessedAt       *time.Time
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
-	LatestReceivedAt     *time.Time
-	ReceiveRevision      int64 `json:"-"`
+	LatestReceivedAt          *time.Time
+	ReceiveRevision           int64      `json:"-"`
+	AutoRotateDurationSeconds int64      `json:"auto_rotate_duration_seconds"`
+	AutoRotateArmedAt         *time.Time `json:"auto_rotate_armed_at"`
+	AutoRotateDeadline        *time.Time `json:"auto_rotate_deadline"`
 }
 
 // MailGroup is an administrator-defined collection of privacy mailboxes.

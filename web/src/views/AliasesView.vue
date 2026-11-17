@@ -460,9 +460,32 @@
               </el-tag>
               <el-tag v-else-if="!row.accountEnabled && row.configuredEnabled" type="info" effect="plain" size="small">随主号暂停</el-tag>
               <SyncStatus v-else :item="row" details />
+              <div v-if="row.autoRotateDurationMinutes > 0" class="alias-auto-rotate-tag" style="margin-top: 4px;">
+                <el-tooltip
+                  :content="row.autoRotateDeadline ? `倒计时中：将于 ${formatTime(row.autoRotateDeadline, { seconds: true })} 自动轮换整套凭证` : `待命中：设定接码后 ${row.autoRotateDurationMinutes} 分钟自动轮换，收到首条验证码后启动倒计时`"
+                  placement="top"
+                >
+                  <el-tag
+                    :type="row.autoRotateDeadline ? 'warning' : 'info'"
+                    size="small"
+                    effect="light"
+                    style="cursor: pointer"
+                    @click="openAutoRotateDialog(row)"
+                  >
+                    <el-icon style="margin-right: 3px;"><Timer /></el-icon>
+                    {{ row.autoRotateDeadline ? '轮换倒计时中' : `待命轮换(${row.autoRotateDurationMinutes}分)` }}
+                  </el-tag>
+                </el-tooltip>
+              </div>
             </template>
             <template v-else-if="column.key === 'actions'">
               <div class="icon-action-row">
+                <el-button
+                  v-if="row.credentialMode === 'v2'"
+                  size="small"
+                  :icon="Timer"
+                  @click="openAutoRotateDialog(row)"
+                >轮换设置</el-button>
                 <el-button
                   v-if="isAliasExportable(row)"
                   size="small"
@@ -552,8 +575,29 @@
               <dt>分组</dt>
               <dd>{{ alias.groupName || "未分组" }}</dd>
             </div>
+            <div v-if="alias.autoRotateDurationMinutes > 0">
+              <dt>自动轮换</dt>
+              <dd>
+                <el-tag
+                  :type="alias.autoRotateDeadline ? 'warning' : 'info'"
+                  size="small"
+                  effect="light"
+                  style="cursor: pointer"
+                  @click="openAutoRotateDialog(alias)"
+                >
+                  {{ alias.autoRotateDeadline ? '倒计时中' : `待命(${alias.autoRotateDurationMinutes}分)` }}
+                </el-tag>
+              </dd>
+            </div>
           </dl>
           <footer class="mobile-record__actions mobile-record__actions--direct-link">
+            <el-button
+              v-if="alias.credentialMode === 'v2'"
+              :icon="Timer"
+              @click="openAutoRotateDialog(alias)"
+            >
+              轮换设置
+            </el-button>
             <el-button
               v-if="isAliasExportable(alias)"
               :icon="CopyDocument"
@@ -624,6 +668,13 @@
         @size-change="handlePageSizeChange"
       />
     </template>
+
+    <AutoRotateDialog
+      v-model="autoRotateDialogVisible"
+      :alias="autoRotateTargetAlias"
+      :csrf-token="auth.state.csrfToken"
+      @updated="handleAutoRotateUpdated"
+    />
   </section>
 </template>
 
@@ -639,6 +690,7 @@ import {
   RefreshLeft,
   Search,
   Setting,
+  Timer,
 } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
@@ -666,6 +718,7 @@ import RequestAlert from "../components/RequestAlert.vue";
 import SectionHeader from "../components/SectionHeader.vue";
 import SyncStatus from "../components/SyncStatus.vue";
 import VirtualDataTable from "../components/VirtualDataTable.vue";
+import AutoRotateDialog from "../components/AutoRotateDialog.vue";
 import { useAuth } from "../stores/auth.js";
 import {
   ALIAS_DELETION_OPERATION_LABELS,
@@ -714,9 +767,23 @@ const aliasColumns = [
   { key: "lastAccessedAt", title: "最近调用", width: 150, flexGrow: 1 },
   { key: "latestReceivedAt", title: "最新邮件", width: 150, flexGrow: 1 },
   { key: "status", title: "状态", width: 134, flexGrow: 1 },
-  { key: "actions", title: "复制 / 收件 / 管理", width: 320, align: "right", fixed: "right" },
+  { key: "actions", title: "复制 / 收件 / 管理", width: 380, align: "right", fixed: "right" },
 ];
 const aliases = ref([]);
+const autoRotateDialogVisible = ref(false);
+const autoRotateTargetAlias = ref(null);
+
+function openAutoRotateDialog(alias) {
+  autoRotateTargetAlias.value = alias;
+  autoRotateDialogVisible.value = true;
+}
+
+function handleAutoRotateUpdated(updatedAlias) {
+  const index = aliases.value.findIndex((a) => a.id === updatedAlias.id);
+  if (index >= 0) {
+    aliases.value[index] = { ...aliases.value[index], ...updatedAlias };
+  }
+}
 const accounts = ref([]);
 const selectedAccountId = ref("");
 const selectedGroupFilter = ref("");

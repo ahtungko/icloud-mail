@@ -110,6 +110,7 @@ func (s *Server) registerAdminAPIRoutes(api *gin.RouterGroup) {
 	protected.GET("/aliases/:id", s.adminAPIGetAlias)
 	protected.POST("/aliases/:id/rotate-key", s.adminAPIRotateAliasKey)
 	protected.POST("/aliases/:id/rotate-credentials", s.adminAPIRotateAliasCredentials)
+	protected.POST("/aliases/:id/auto-rotate", s.adminAPISetAliasAutoRotate)
 	protected.PATCH("/aliases/:id", s.adminAPIUpdateAlias)
 	protected.PATCH("/aliases/:id/group", s.adminAPIMoveAliasToGroup)
 	protected.DELETE("/aliases/:id", s.adminAPIDeleteAlias)
@@ -185,9 +186,13 @@ type adminAPIAliasDTO struct {
 	LastSyncErrorLog  string  `json:"last_sync_error_log"`
 	LastSyncedAt      *string `json:"last_synced_at"`
 	LastAccessedAt    *string `json:"last_accessed_at"`
-	LatestReceivedAt  *string `json:"latest_received_at"`
-	CreatedAt         string  `json:"created_at"`
-	UpdatedAt         string  `json:"updated_at"`
+	LatestReceivedAt           *string `json:"latest_received_at"`
+	AutoRotateDurationMinutes  int     `json:"auto_rotate_duration_minutes"`
+	AutoRotateArmedAt          *string `json:"auto_rotate_armed_at"`
+	AutoRotateDeadline         *string `json:"auto_rotate_deadline"`
+	AutoRotateRemainingSeconds *int64  `json:"auto_rotate_remaining_seconds"`
+	CreatedAt                  string  `json:"created_at"`
+	UpdatedAt                  string  `json:"updated_at"`
 }
 
 type adminAPIAuditLogDTO struct {
@@ -452,28 +457,44 @@ func (s *Server) adminAPIAccountFromDomain(account domain.Account) adminAPIAccou
 }
 
 func (s *Server) adminAPIAliasFromDomain(alias domain.Alias) (adminAPIAliasDTO, error) {
+	var remainingSeconds *int64
+	if alias.AutoRotateDeadline != nil {
+		now := time.Now().UTC()
+		if s.now != nil {
+			now = s.now().UTC()
+		}
+		rem := int64(alias.AutoRotateDeadline.Sub(now).Seconds())
+		if rem < 0 {
+			rem = 0
+		}
+		remainingSeconds = &rem
+	}
 	dto := adminAPIAliasDTO{
-		ID:                alias.ID,
-		AccountID:         alias.AccountID,
-		AccountEmail:      alias.AccountEmail,
-		Address:           alias.Address,
-		Label:             alias.Label,
-		GroupID:           alias.GroupID,
-		GroupName:         alias.GroupName,
-		APIKeyPrefix:      alias.APIKeyPrefix,
-		CredentialMode:    alias.CredentialMode,
-		CredentialVersion: alias.CredentialVersion,
-		Enabled:           alias.Enabled && !alias.AccountDisabled,
-		ConfiguredEnabled: alias.Enabled,
-		AccountEnabled:    !alias.AccountDisabled,
-		LastSyncStatus:    alias.LastSyncStatus,
-		LastSyncError:     adminAPISyncErrorSummary(alias.LastSyncError),
-		LastSyncErrorLog:  alias.LastSyncError,
-		LastSyncedAt:      adminAPIOptionalTime(alias.LastSyncedAt),
-		LastAccessedAt:    adminAPIOptionalTime(alias.LastAccessedAt),
-		LatestReceivedAt:  adminAPIOptionalTime(alias.LatestReceivedAt),
-		CreatedAt:         adminAPITime(alias.CreatedAt),
-		UpdatedAt:         adminAPITime(alias.UpdatedAt),
+		ID:                         alias.ID,
+		AccountID:                  alias.AccountID,
+		AccountEmail:               alias.AccountEmail,
+		Address:                    alias.Address,
+		Label:                      alias.Label,
+		GroupID:                    alias.GroupID,
+		GroupName:                  alias.GroupName,
+		APIKeyPrefix:               alias.APIKeyPrefix,
+		CredentialMode:             alias.CredentialMode,
+		CredentialVersion:          alias.CredentialVersion,
+		Enabled:                    alias.Enabled && !alias.AccountDisabled,
+		ConfiguredEnabled:          alias.Enabled,
+		AccountEnabled:             !alias.AccountDisabled,
+		LastSyncStatus:             alias.LastSyncStatus,
+		LastSyncError:              adminAPISyncErrorSummary(alias.LastSyncError),
+		LastSyncErrorLog:           alias.LastSyncError,
+		LastSyncedAt:               adminAPIOptionalTime(alias.LastSyncedAt),
+		LastAccessedAt:             adminAPIOptionalTime(alias.LastAccessedAt),
+		LatestReceivedAt:           adminAPIOptionalTime(alias.LatestReceivedAt),
+		AutoRotateDurationMinutes:  int(alias.AutoRotateDurationSeconds / 60),
+		AutoRotateArmedAt:          adminAPIOptionalTime(alias.AutoRotateArmedAt),
+		AutoRotateDeadline:         adminAPIOptionalTime(alias.AutoRotateDeadline),
+		AutoRotateRemainingSeconds: remainingSeconds,
+		CreatedAt:                  adminAPITime(alias.CreatedAt),
+		UpdatedAt:                  adminAPITime(alias.UpdatedAt),
 	}
 	if adminAPIAliasConfirmationPending(alias) {
 		// Apple has not published this address yet. Do not expose any usable

@@ -302,6 +302,36 @@ export function normalizeAlias(raw = {}) {
         "latestReceivedAt",
         "LatestReceivedAt",
       ) || null,
+    autoRotateDurationMinutes:
+      Number(
+        firstDefined(
+          raw,
+          "auto_rotate_duration_minutes",
+          "autoRotateDurationMinutes",
+          "AutoRotateDurationMinutes",
+        ),
+      ) || 0,
+    autoRotateArmedAt:
+      firstDefined(
+        raw,
+        "auto_rotate_armed_at",
+        "autoRotateArmedAt",
+        "AutoRotateArmedAt",
+      ) || null,
+    autoRotateDeadline:
+      firstDefined(
+        raw,
+        "auto_rotate_deadline",
+        "autoRotateDeadline",
+        "AutoRotateDeadline",
+      ) || null,
+    autoRotateRemainingSeconds:
+      firstDefined(
+        raw,
+        "auto_rotate_remaining_seconds",
+        "autoRotateRemainingSeconds",
+        "AutoRotateRemainingSeconds",
+      ) ?? null,
   };
 }
 
@@ -1073,6 +1103,16 @@ export async function rotateAlias(id, csrfToken, credentialMode = "") {
     await apiRequest(`/aliases/${encodeURIComponent(id)}/${operation}`, {
       method: "POST",
       csrfToken,
+    }),
+  );
+}
+
+export async function setAliasAutoRotate(id, durationMinutes, csrfToken) {
+  return aliasMutationResult(
+    await apiRequest(`/aliases/${encodeURIComponent(id)}/auto-rotate`, {
+      method: "POST",
+      csrfToken,
+      body: { duration_minutes: Number(durationMinutes) || 0 },
     }),
   );
 }

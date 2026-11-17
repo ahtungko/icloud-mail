@@ -140,6 +140,7 @@ func TestReconcileAppleDirectoryProtectsOtherAccountsNewAndPending(t *testing.T)
 		t.Fatal(err)
 	}
 	started := time.Now()
+	time.Sleep(25 * time.Millisecond)
 	if _, err := db.CreateAlias(ctx, domain.Alias{AccountID: account.ID, Address: "created-after-read@icloud.com", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}

@@ -27,11 +27,13 @@ import {
   moveAliasToGroup,
   moveAliasesToGroup,
   normalizeAccount,
+  normalizeAlias,
   normalizeAutoCreation,
   normalizeAliasDeletionJob,
   rotateAlias,
   rotateAllAliasCredentials,
   setAliasAutoCreation,
+  setAliasAutoRotate,
   syncAccount,
   syncAccountAliases,
   startAliasDeletionJob,
@@ -1661,4 +1663,60 @@ test("automatic creation run logs follow every cursor with their own run filter"
     assert.equal(request.searchParams.has("level"), false);
     assert.equal(request.searchParams.has("query"), false);
   }
+});
+
+test("normalizeAlias parses auto rotate attributes correctly", () => {
+  const normalized = normalizeAlias({
+    id: 101,
+    address: "rotate@example.com",
+    credential_mode: "v2",
+    auto_rotate_duration_minutes: 60,
+    auto_rotate_armed_at: "2026-11-17T10:00:00Z",
+    auto_rotate_deadline: "2026-11-17T11:00:00Z",
+    auto_rotate_remaining_seconds: 3600,
+  });
+
+  assert.equal(normalized.id, 101);
+  assert.equal(normalized.address, "rotate@example.com");
+  assert.equal(normalized.autoRotateDurationMinutes, 60);
+  assert.equal(normalized.autoRotateArmedAt, "2026-11-17T10:00:00Z");
+  assert.equal(normalized.autoRotateDeadline, "2026-11-17T11:00:00Z");
+  assert.equal(normalized.autoRotateRemainingSeconds, 3600);
+
+  const disabled = normalizeAlias({
+    id: 102,
+    address: "norotate@example.com",
+  });
+  assert.equal(disabled.autoRotateDurationMinutes, 0);
+  assert.equal(disabled.autoRotateArmedAt, null);
+  assert.equal(disabled.autoRotateDeadline, null);
+  assert.equal(disabled.autoRotateRemainingSeconds, null);
+});
+
+test("setAliasAutoRotate posts duration_minutes to backend and returns normalized alias", async () => {
+  let request;
+  globalThis.fetch = async (url, options) => {
+    request = { url, options };
+    return jsonResponse({
+      alias: {
+        id: 101,
+        address: "rotate@example.com",
+        credential_mode: "v2",
+        auto_rotate_duration_minutes: 120,
+        auto_rotate_armed_at: "2026-11-17T10:00:00Z",
+        auto_rotate_deadline: null,
+        auto_rotate_remaining_seconds: null,
+      },
+    });
+  };
+
+  const result = await setAliasAutoRotate(101, 120, "csrf-test-token");
+
+  assert.equal(request.url, "/admin/api/v1/aliases/101/auto-rotate");
+  assert.equal(request.options.method, "POST");
+  assert.equal(request.options.headers.get("X-CSRF-Token"), "csrf-test-token");
+  assert.deepEqual(JSON.parse(request.options.body), { duration_minutes: 120 });
+  assert.equal(result.alias.id, 101);
+  assert.equal(result.alias.autoRotateDurationMinutes, 120);
+  assert.equal(result.alias.autoRotateDeadline, null);
 });

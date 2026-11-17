@@ -112,7 +112,8 @@ func scanPendingAliasAPIKey(scanner rowScanner) (domain.PendingAliasAPIKey, erro
 	var enabled bool
 	var groupID sql.NullInt64
 	var mailboxUIDValidity, mailboxUIDNext int64
-	var lastSyncedAt, lastAccessedAt, latestReceivedAt sql.NullInt64
+	var lastSyncedAt, lastAccessedAt, latestReceivedAt, autoRotateArmedAt, autoRotateDeadline sql.NullInt64
+	var autoRotateDurationSeconds int64
 	var createdAt, updatedAt, pendingCreatedAt int64
 	if err := scanner.Scan(
 		&alias.ID, &alias.AccountID, &alias.AccountEmail, &alias.Address, &alias.Label,
@@ -123,6 +124,7 @@ func scanPendingAliasAPIKey(scanner rowScanner) (domain.PendingAliasAPIKey, erro
 		&enabled, &alias.LastSyncStatus, &alias.LastSyncError,
 		&lastSyncedAt, &lastAccessedAt, &createdAt, &updatedAt, &latestReceivedAt, &alias.AccountDisabled,
 		&alias.ReceiveRevision,
+		&autoRotateDurationSeconds, &autoRotateArmedAt, &autoRotateDeadline,
 		&pending.APIKeyCiphertext, &pendingCreatedAt,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -149,6 +151,9 @@ func scanPendingAliasAPIKey(scanner rowScanner) (domain.PendingAliasAPIKey, erro
 	alias.CreatedAt = timeFromTimestamp(createdAt)
 	alias.UpdatedAt = timeFromTimestamp(updatedAt)
 	alias.LatestReceivedAt = timePtr(latestReceivedAt)
+	alias.AutoRotateDurationSeconds = autoRotateDurationSeconds
+	alias.AutoRotateArmedAt = timePtr(autoRotateArmedAt)
+	alias.AutoRotateDeadline = timePtr(autoRotateDeadline)
 	pending.Alias = alias
 	pending.CreatedAt = timeFromTimestamp(pendingCreatedAt)
 	return pending, nil

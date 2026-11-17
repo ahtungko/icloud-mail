@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, access } from "node:fs/promises";
 
 const root = new URL("../../", import.meta.url);
-const read = (path) => readFile(new URL(path, root), "utf8");
+const read = async (path) => (await readFile(new URL(path, root), "utf8")).replace(/\r\n/g, "\n");
 
 test("release version matches package metadata and public documentation", async () => {
   const version = (await read("VERSION")).trim();

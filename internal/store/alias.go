@@ -24,7 +24,8 @@ const aliasColumns = `
 	 FROM alias_messages am
 	 JOIN archived_messages m ON m.id = am.message_id
 	 WHERE am.alias_id = al.id), NOT ac.enabled,
-	COALESCE((SELECT revision FROM alias_receive_revisions WHERE alias_id = al.id), 0)`
+	COALESCE((SELECT revision FROM alias_receive_revisions WHERE alias_id = al.id), 0),
+	al.auto_rotate_duration_seconds, al.auto_rotate_armed_at, al.auto_rotate_deadline`
 
 const aliasJoins = `
 	FROM aliases al
@@ -643,7 +644,8 @@ func scanAlias(scanner rowScanner) (domain.Alias, error) {
 	var enabled bool
 	var groupID sql.NullInt64
 	var mailboxUIDValidity, mailboxUIDNext int64
-	var lastSyncedAt, lastAccessedAt, latestReceivedAt sql.NullInt64
+	var lastSyncedAt, lastAccessedAt, latestReceivedAt, autoRotateArmedAt, autoRotateDeadline sql.NullInt64
+	var autoRotateDurationSeconds int64
 	var createdAt, updatedAt int64
 	err := scanner.Scan(
 		&alias.ID, &alias.AccountID, &alias.AccountEmail, &alias.Address, &alias.Label,
@@ -655,6 +657,7 @@ func scanAlias(scanner rowScanner) (domain.Alias, error) {
 		&alias.LastSyncError, &lastSyncedAt, &lastAccessedAt,
 		&createdAt, &updatedAt, &latestReceivedAt, &alias.AccountDisabled,
 		&alias.ReceiveRevision,
+		&autoRotateDurationSeconds, &autoRotateArmedAt, &autoRotateDeadline,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -681,5 +684,91 @@ func scanAlias(scanner rowScanner) (domain.Alias, error) {
 	alias.CreatedAt = timeFromTimestamp(createdAt)
 	alias.UpdatedAt = timeFromTimestamp(updatedAt)
 	alias.LatestReceivedAt = timePtr(latestReceivedAt)
+	alias.AutoRotateDurationSeconds = autoRotateDurationSeconds
+	alias.AutoRotateArmedAt = timePtr(autoRotateArmedAt)
+	alias.AutoRotateDeadline = timePtr(autoRotateDeadline)
 	return alias, nil
+}
+
+func (s *Store) SetAliasAutoRotate(ctx context.Context, id int64, durationSeconds int64) (domain.Alias, error) {
+	if id < 1 {
+		return domain.Alias{}, errors.New("set alias auto rotate: alias ID must be positive")
+	}
+	if durationSeconds < 0 {
+		return domain.Alias{}, errors.New("set alias auto rotate: duration must be non-negative")
+	}
+	now := s.now()
+	var result sql.Result
+	var err error
+	if durationSeconds == 0 {
+		result, err = s.execContext(ctx, `
+			UPDATE aliases
+			SET auto_rotate_duration_seconds = 0,
+				auto_rotate_armed_at = NULL,
+				auto_rotate_deadline = NULL,
+				updated_at = ?
+			WHERE id = ?`,
+			timestamp(now), id,
+		)
+	} else {
+		result, err = s.execContext(ctx, `
+			UPDATE aliases
+			SET auto_rotate_duration_seconds = ?,
+				auto_rotate_armed_at = ?,
+				auto_rotate_deadline = NULL,
+				updated_at = ?
+			WHERE id = ?`,
+			durationSeconds, timestamp(now), timestamp(now), id,
+		)
+	}
+	if err != nil {
+		return domain.Alias{}, fmt.Errorf("set alias auto rotate: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return domain.Alias{}, fmt.Errorf("read set alias auto rotate result: %w", err)
+	}
+	if affected == 0 {
+		return domain.Alias{}, ErrNotFound
+	}
+	return s.GetAlias(ctx, id)
+}
+
+func (s *Store) ClearAliasAutoRotate(ctx context.Context, id int64) error {
+	_, err := s.execContext(ctx, `
+		UPDATE aliases
+		SET auto_rotate_duration_seconds = 0,
+			auto_rotate_armed_at = NULL,
+			auto_rotate_deadline = NULL,
+			updated_at = ?
+		WHERE id = ?`,
+		timestamp(s.now()), id,
+	)
+	return err
+}
+
+func (s *Store) ListDueAutoRotateAliases(ctx context.Context, now time.Time, limit int) ([]domain.Alias, error) {
+	if limit < 1 {
+		limit = 50
+	}
+	rows, err := s.queryContext(ctx, `
+		SELECT `+aliasColumns+aliasJoins+`
+		WHERE al.auto_rotate_deadline IS NOT NULL
+		  AND al.auto_rotate_deadline <= ?
+		ORDER BY al.auto_rotate_deadline ASC
+		LIMIT ?`, timestamp(now), limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list due auto rotate aliases: %w", err)
+	}
+	defer rows.Close()
+	var result []domain.Alias
+	for rows.Next() {
+		alias, scanErr := scanAlias(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, alias)
+	}
+	return result, rows.Err()
 }

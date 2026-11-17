@@ -261,11 +261,15 @@ func run() error {
 	}
 
 	var background sync.WaitGroup
-	background.Add(9)
+	background.Add(10)
 	if activeReceiver != nil {
 		background.Add(1)
 		go func() { defer background.Done(); <-workerContext.Done(); activeReceiver.Close() }()
 	}
+	go func() {
+		defer background.Done()
+		web.RunAliasAutoRotation(workerContext)
+	}()
 	go func() {
 		defer background.Done()
 		hmeService.RunAccountSessionRenewal(workerContext, logger)

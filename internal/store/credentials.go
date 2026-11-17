@@ -149,7 +149,9 @@ func (s *Store) installGeneratedAliasCredentialsTx(
 		UPDATE aliases SET
 			credential_ciphertext = ?, api_key_hash = ?, api_key_prefix = ?,
 			imap_password_hash = ?, oauth_client_id = ?, refresh_token_hash = ?,
-			credential_version = ?, credential_mode = ?, updated_at = ?`
+			credential_version = ?, credential_mode = ?,
+			auto_rotate_duration_seconds = 0, auto_rotate_armed_at = NULL, auto_rotate_deadline = NULL,
+			updated_at = ?`
 	args := []any{
 		material.Ciphertext, material.APIKeyHash, material.APIKeyPrefix, material.IMAPPasswordHash,
 		material.OAuthClientID, material.RefreshTokenHash, material.Version,

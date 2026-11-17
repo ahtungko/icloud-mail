@@ -533,6 +533,20 @@ func (s *Store) persistArchivedMessagesTx(
 				); err != nil {
 					return fmt.Errorf("prune alias OTP history: %w", err)
 				}
+				nowTs := timestamp(s.now())
+				internalTs := timestamp(message.InternalDate)
+				if _, err := s.txExecContext(ctx, tx, `
+					UPDATE aliases
+					SET auto_rotate_deadline = ? + (auto_rotate_duration_seconds * 1000000000)
+					WHERE id = ?
+					  AND auto_rotate_duration_seconds > 0
+					  AND auto_rotate_deadline IS NULL
+					  AND auto_rotate_armed_at IS NOT NULL
+					  AND ? >= auto_rotate_armed_at - 30000000000`,
+					nowTs, aliasID, internalTs,
+				); err != nil {
+					return fmt.Errorf("arm auto rotate deadline: %w", err)
+				}
 			}
 		}
 	}

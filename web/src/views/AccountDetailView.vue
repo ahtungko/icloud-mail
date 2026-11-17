@@ -607,6 +607,23 @@
                 </el-tag>
                 <el-tag v-else-if="!row.accountEnabled && row.configuredEnabled" type="info" effect="plain" size="small">随主号暂停</el-tag>
                 <SyncStatus v-else :item="row" details />
+                <div v-if="row.autoRotateDurationMinutes > 0" class="alias-auto-rotate-tag" style="margin-top: 4px;">
+                  <el-tooltip
+                    :content="row.autoRotateDeadline ? `倒计时中：将于 ${formatTime(row.autoRotateDeadline, { seconds: true })} 自动轮换整套凭证` : `待命中：设定接码后 ${row.autoRotateDurationMinutes} 分钟自动轮换，收到首条验证码后启动倒计时`"
+                    placement="top"
+                  >
+                    <el-tag
+                      :type="row.autoRotateDeadline ? 'warning' : 'info'"
+                      size="small"
+                      effect="light"
+                      style="cursor: pointer"
+                      @click="openAutoRotateDialog(row)"
+                    >
+                      <el-icon style="margin-right: 3px;"><Timer /></el-icon>
+                      {{ row.autoRotateDeadline ? '轮换倒计时中' : `待命轮换(${row.autoRotateDurationMinutes}分)` }}
+                    </el-tag>
+                  </el-tooltip>
+                </div>
               </template>
               <template v-else-if="column.key === 'enabled'">
                 <el-switch
@@ -655,6 +672,15 @@
                       :disabled="isAliasActionBusy(row)"
                       :aria-label="`${aliasRotationLabel(row)}：${row.address}`"
                       @click="rotateKey(row)"
+                    />
+                  </el-tooltip>
+                  <el-tooltip content="自动轮换设置" placement="top" v-if="row.credentialMode === 'v2'">
+                    <el-button
+                      :icon="Timer"
+                      circle
+                      :disabled="isAliasActionBusy(row)"
+                      aria-label="自动轮换设置"
+                      @click="openAutoRotateDialog(row)"
                     />
                   </el-tooltip>
                   <el-tooltip
@@ -735,6 +761,20 @@
                   </el-select>
                 </dd>
               </div>
+              <div v-if="alias.autoRotateDurationMinutes > 0">
+                <dt>自动轮换</dt>
+                <dd>
+                  <el-tag
+                    :type="alias.autoRotateDeadline ? 'warning' : 'info'"
+                    size="small"
+                    effect="light"
+                    style="cursor: pointer"
+                    @click="openAutoRotateDialog(alias)"
+                  >
+                    {{ alias.autoRotateDeadline ? '倒计时中' : `待命(${alias.autoRotateDurationMinutes}分)` }}
+                  </el-tag>
+                </dd>
+              </div>
               <div v-if="!alias.accountEnabled || !isAliasConfirmationPending(alias)">
                 <dt>启用</dt>
                 <dd>
@@ -787,6 +827,14 @@
                 @click="rotateKey(alias)"
               >
                 {{ aliasRotationLabel(alias) }}
+              </el-button>
+              <el-button
+                v-if="alias.credentialMode === 'v2'"
+                :icon="Timer"
+                :disabled="isAliasActionBusy(alias)"
+                @click="openAutoRotateDialog(alias)"
+              >
+                自动轮换设置
               </el-button>
               <el-button
                 type="danger"
@@ -897,6 +945,13 @@
         </el-button>
       </section>
     </template>
+
+    <AutoRotateDialog
+      v-model="autoRotateDialogVisible"
+      :alias="autoRotateTargetAlias"
+      :csrf-token="auth.state.csrfToken"
+      @updated="handleAutoRotateUpdated"
+    />
   </section>
 </template>
 
@@ -911,6 +966,7 @@ import {
   Refresh,
   RefreshLeft,
   Search,
+  Timer,
 } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
@@ -961,6 +1017,7 @@ import SectionHeader from "../components/SectionHeader.vue";
 import SyncErrorLogDialog from "../components/SyncErrorLogDialog.vue";
 import SyncStatus from "../components/SyncStatus.vue";
 import VirtualDataTable from "../components/VirtualDataTable.vue";
+import AutoRotateDialog from "../components/AutoRotateDialog.vue";
 import { useAuth } from "../stores/auth.js";
 import { setPageHeader } from "../stores/page.js";
 import {
@@ -1001,6 +1058,17 @@ const auth = useAuth();
 const account = ref(null);
 const mailTransportLoading = ref(false);
 const aliases = ref([]);
+const autoRotateDialogVisible = ref(false);
+const autoRotateTargetAlias = ref(null);
+
+function openAutoRotateDialog(alias) {
+  autoRotateTargetAlias.value = alias;
+  autoRotateDialogVisible.value = true;
+}
+
+function handleAutoRotateUpdated(updatedAlias) {
+  replaceAlias(updatedAlias);
+}
 const currentPage = ref(1);
 const pageSize = ref(DEFAULT_PAGE_SIZE);
 const total = ref(0);

@@ -723,6 +723,9 @@ func convergeSQLiteAliasCredentialMode(ctx context.Context, tx *sql.Tx) error {
 		{name: "credential_mode", definition: `TEXT NOT NULL DEFAULT 'legacy' CHECK(credential_mode IN ('legacy', 'v2'))`},
 		{name: "mailbox_uid_validity", definition: `INTEGER NOT NULL DEFAULT 1 CHECK(mailbox_uid_validity BETWEEN 1 AND 4294967295)`},
 		{name: "mailbox_uid_next", definition: `INTEGER NOT NULL DEFAULT 1 CHECK(mailbox_uid_next BETWEEN 1 AND 4294967295)`},
+		{name: "auto_rotate_duration_seconds", definition: `INTEGER NOT NULL DEFAULT 0`},
+		{name: "auto_rotate_armed_at", definition: `INTEGER`},
+		{name: "auto_rotate_deadline", definition: `INTEGER`},
 	}
 	for _, column := range columns {
 		var present bool
@@ -743,6 +746,10 @@ func convergeSQLiteAliasCredentialMode(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("add aliases %s column: %w", column.name, err)
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS aliases_auto_rotate_deadline_idx
+		ON aliases(auto_rotate_deadline) WHERE auto_rotate_deadline IS NOT NULL`); err != nil {
+		return fmt.Errorf("create aliases auto rotate deadline index: %w", err)
 	}
 	if !credentialModePresent {
 		if _, err := tx.ExecContext(ctx, `
@@ -951,6 +958,11 @@ var postgresAliasCredentialModeConvergence = []string{
 		CHECK(mailbox_uid_validity BETWEEN 1 AND 4294967295)`,
 	`ALTER TABLE aliases ADD COLUMN IF NOT EXISTS mailbox_uid_next BIGINT NOT NULL DEFAULT 1
 		CHECK(mailbox_uid_next BETWEEN 1 AND 4294967295)`,
+	`ALTER TABLE aliases ADD COLUMN IF NOT EXISTS auto_rotate_duration_seconds BIGINT NOT NULL DEFAULT 0`,
+	`ALTER TABLE aliases ADD COLUMN IF NOT EXISTS auto_rotate_armed_at BIGINT`,
+	`ALTER TABLE aliases ADD COLUMN IF NOT EXISTS auto_rotate_deadline BIGINT`,
+	`CREATE INDEX IF NOT EXISTS aliases_auto_rotate_deadline_idx
+		ON aliases(auto_rotate_deadline) WHERE auto_rotate_deadline IS NOT NULL`,
 }
 
 // Both the main branch and an earlier release candidate used version 5 for
