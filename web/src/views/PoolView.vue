@@ -77,7 +77,7 @@
                 date(row.updated_at)
               }}</template></el-table-column
             >
-            <el-table-column label="操作" min-width="185"
+            <el-table-column label="操作" min-width="300"
               ><template #default="{ row }">
                 <el-button
                   link
@@ -85,6 +85,8 @@
                   @click="showCredentials(row.alias_id)"
                   >凭据</el-button
                 >
+                <el-button v-if="row.state === 'available' || row.state === 'used'" link type="primary" :disabled="!row.enabled" @click="openMemberOTP(row)">取码</el-button>
+                <el-button v-if="row.state === 'used'" link type="primary" :disabled="!row.enabled" @click="openMemberAutoRotate(row)">自动轮换</el-button>
                 <el-button
                   v-if="row.state === 'available' || row.state === 'paused'"
                   link
@@ -553,6 +555,7 @@ grant_type=refresh_token&amp;client_id=CLIENT_ID&amp;refresh_token=REFRESH_TOKEN
           ><el-button @click="secretOpen = false">关闭</el-button></template
         >
       </el-dialog>
+      <AutoRotateDialog v-model="autoRotateOpen" :alias="autoRotateAlias" :csrf-token="auth.state.csrfToken" @updated="autoRotateAlias = $event" />
     </section>
   </el-config-provider>
 </template>
@@ -563,16 +566,20 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { Delete, Download, Link } from "@element-plus/icons-vue";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { apiRequest } from "../api/client.js";
-import { getAliasPage, getAllAliases, getAllAccounts } from "../api/admin.js";
+import { getAliasPage, getAllAliases, getAllAccounts, normalizeAlias } from "../api/admin.js";
 import { mergePoolPageSelection, poolAliasSelectable, submitPoolEnrollment } from "../utils/poolEnrollment.js";
 import { useAuth } from "../stores/auth.js";
 import SectionHeader from "../components/SectionHeader.vue";
 import RequestAlert from "../components/RequestAlert.vue";
+import AutoRotateDialog from "../components/AutoRotateDialog.vue";
 import { buildOTPDirectLink, copyText } from "../utils/clipboard.js";
+import { buildAliasReceiveLink } from "../utils/aliasExport.js";
 import { createCheckboxDragSelection } from "../utils/checkboxDragSelection.js";
 import { buildProjectMailboxExportText, buildProjectMailboxFilename, collectProjectMailboxes } from "../utils/projectMailboxExport.js";
 
 const auth = useAuth();
+const autoRotateOpen = ref(false), autoRotateAlias = ref(null);
+let autoRotateReadTicket = 0;
 const tab = ref("members"),
   loading = ref(false),
   busy = ref(false),
@@ -894,6 +901,7 @@ function refreshTab() {
   return refresh(false);
 }
 onBeforeUnmount(() => {
+  ++autoRotateReadTicket;
   ++poolRefreshTicket;
   ++memberReadTicket;
   ++leaseReadTicket;
@@ -1132,6 +1140,44 @@ async function enroll() {
     if (current()) error.value = e;
   } finally {
     enrollSubmitting.value = false;
+  }
+}
+async function fetchMemberAlias(id) {
+  const result = await request(`/aliases/${encodeURIComponent(id)}`);
+  return normalizeAlias(result.alias || result);
+}
+async function openMemberOTP(row) {
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    ElMessage.error("无法打开取码窗口，请允许弹出窗口后重试。");
+    return;
+  }
+  popup.opener = null;
+  try {
+    const referrerPolicy = popup.document.createElement("meta");
+    referrerPolicy.name = "referrer";
+    referrerPolicy.content = "no-referrer";
+    popup.document.head.appendChild(referrerPolicy);
+    const alias = await fetchMemberAlias(row.alias_id);
+    popup.location.replace(buildAliasReceiveLink(alias));
+  } catch (e) {
+    popup.close();
+    error.value = e;
+  }
+}
+async function openMemberAutoRotate(row) {
+  const ticket = ++autoRotateReadTicket;
+  try {
+    const alias = await fetchMemberAlias(row.alias_id);
+    if (ticket !== autoRotateReadTicket) return;
+    if (alias.credentialMode !== "v2") {
+      ElMessage.warning("旧版邮箱需要先升级为整套凭据，才能设置自动轮换。");
+      return;
+    }
+    autoRotateAlias.value = alias;
+    autoRotateOpen.value = true;
+  } catch (e) {
+    if (ticket === autoRotateReadTicket && e.name !== "AbortError") error.value = e;
   }
 }
 async function showCredentials(id) {

@@ -4,7 +4,9 @@
     :title="`设置凭证自动轮换 - ${alias?.address || ''}`"
     width="min(560px, calc(100vw - 28px))"
     :close-on-click-modal="false"
-    @update:model-value="$emit('update:modelValue', $event)"
+    :show-close="!saving"
+    :close-on-press-escape="!saving"
+    @update:model-value="updateVisibility"
   >
     <div v-if="alias" class="auto-rotate-dialog-content">
       <el-alert
@@ -48,7 +50,7 @@
         description="该邮箱凭证不会自动轮换，如需更换需手动在操作栏点击轮换。"
       />
 
-      <el-form label-position="top" class="auto-rotate-form">
+      <el-form label-position="top" class="auto-rotate-form" :disabled="saving">
         <el-form-item label="轮换整套凭证有效时长">
           <el-radio-group v-model="selectedOption" class="auto-rotate-options">
             <el-radio-button :value="0">关闭</el-radio-button>
@@ -88,7 +90,7 @@
 
     <template #footer>
       <div class="dialog-footer">
-        <el-button :disabled="saving" @click="$emit('update:modelValue', false)">取消</el-button>
+        <el-button :disabled="saving" @click="updateVisibility(false)">取消</el-button>
         <el-button
           v-if="alias?.autoRotateDurationMinutes > 0"
           type="danger"
@@ -107,7 +109,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { setAliasAutoRotate } from "../api/admin.js";
 import { formatTime } from "../utils/format.js";
@@ -132,10 +134,21 @@ const emit = defineEmits(["update:modelValue", "updated"]);
 const selectedOption = ref(0);
 const customMinutes = ref(30);
 const saving = ref(false);
+let dialogSession = 0;
+
+function updateVisibility(value) {
+  if (!saving.value) emit("update:modelValue", value);
+}
+
+onBeforeUnmount(() => { ++dialogSession; });
 
 watch(
-  () => props.alias,
-  (item) => {
+  [() => props.modelValue, () => props.alias],
+  ([visible, item]) => {
+    ++dialogSession;
+    saving.value = false;
+    if (!visible) return;
+    customMinutes.value = 30;
     if (!item) {
       selectedOption.value = 0;
       customMinutes.value = 30;
@@ -149,47 +162,42 @@ watch(
       customMinutes.value = mins;
     }
   },
-  { immediate: true },
+  { immediate: true, flush: "sync" },
 );
 
-async function submitDisable() {
-  if (!props.alias) return;
+async function submitDuration(targetMinutes, failureMessage) {
+  if (!props.alias || !props.modelValue || saving.value) return;
+  const session = dialogSession;
+  const aliasID = props.alias.id;
   saving.value = true;
   try {
-    const result = await setAliasAutoRotate(props.alias.id, 0, props.csrfToken);
-    ElMessage.success("已关闭该邮箱的凭据自动轮换");
+    const result = await setAliasAutoRotate(aliasID, targetMinutes, props.csrfToken);
+    if (session !== dialogSession) return;
+    ElMessage.success(targetMinutes > 0
+      ? `已设置接码后 ${targetMinutes} 分钟自动轮换整套凭证`
+      : "已关闭该邮箱的凭据自动轮换");
     emit("updated", result.alias);
     emit("update:modelValue", false);
   } catch (err) {
-    ElMessage.error(err?.message || "关闭自动轮换失败，请稍后重试");
+    if (session === dialogSession) ElMessage.error(err?.message || failureMessage);
   } finally {
-    saving.value = false;
+    if (session === dialogSession) saving.value = false;
   }
 }
 
+async function submitDisable() {
+  return submitDuration(0, "关闭自动轮换失败，请稍后重试");
+}
+
 async function submitSave() {
-  if (!props.alias) return;
-  let targetMinutes = 0;
-  if (selectedOption.value === "custom") {
-    targetMinutes = Number(customMinutes.value) || 0;
-  } else {
-    targetMinutes = Number(selectedOption.value) || 0;
+  if (!props.alias || !props.modelValue || saving.value) return;
+  const custom = selectedOption.value === "custom";
+  const targetMinutes = Number(custom ? customMinutes.value : selectedOption.value);
+  if (!Number.isInteger(targetMinutes) || targetMinutes < (custom ? 1 : 0) || targetMinutes > 10080) {
+    ElMessage.error("自定义轮换时间必须是 1 到 10080 之间的整数分钟。");
+    return;
   }
-  saving.value = true;
-  try {
-    const result = await setAliasAutoRotate(props.alias.id, targetMinutes, props.csrfToken);
-    if (targetMinutes > 0) {
-      ElMessage.success(`已设置接码后 ${targetMinutes} 分钟自动轮换整套凭证`);
-    } else {
-      ElMessage.success("已关闭凭证自动轮换");
-    }
-    emit("updated", result.alias);
-    emit("update:modelValue", false);
-  } catch (err) {
-    ElMessage.error(err?.message || "保存设置失败，请稍后重试");
-  } finally {
-    saving.value = false;
-  }
+  return submitDuration(targetMinutes, "保存设置失败，请稍后重试");
 }
 </script>
 
