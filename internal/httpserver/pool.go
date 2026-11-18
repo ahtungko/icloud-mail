@@ -90,6 +90,7 @@ func (s *Server) registerAdminPoolRoutes(api *gin.RouterGroup) {
 	api.PATCH("/clients/:clientID", s.adminUpdatePoolClient)
 	api.GET("/projects/:clientID/mailboxes", s.adminPoolProjectMailboxes)
 	api.POST("/projects/:clientID/mailboxes", s.adminLinkPoolProjectMailboxes)
+	api.DELETE("/projects/:clientID/mailboxes", s.adminUnlinkPoolProjectAccountMailboxes)
 	api.DELETE("/projects/:clientID/mailboxes/:aliasID", s.adminUnlinkPoolProjectMailbox)
 }
 

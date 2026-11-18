@@ -119,6 +119,21 @@ func TestAdminPoolProjectMailboxLinksAndExport(t *testing.T) {
 	if !strings.Contains(r.Body.String(), `"total":0`) {
 		t.Fatalf("unlink left shared membership: %s", r.Body.String())
 	}
+	r = request(http.MethodPost, base, fmt.Sprintf(`{"account_id":%d}`, account.ID), true)
+	if r.Code != http.StatusOK {
+		t.Fatalf("relink: %d", r.Code)
+	}
+	bulkPath := base + fmt.Sprintf("?account_id=%d", account.ID)
+	if r = request(http.MethodDelete, bulkPath, "", false); r.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated bulk unlink: %d", r.Code)
+	}
+	if r = request(http.MethodDelete, base, "", true); r.Code != http.StatusBadRequest {
+		t.Fatalf("missing account accepted: %d", r.Code)
+	}
+	r = request(http.MethodDelete, bulkPath, "", true)
+	if r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `"removed":1`) {
+		t.Fatalf("bulk unlink: %d %s", r.Code, r.Body.String())
+	}
 	lease, err := env.store.GetPoolLease(ctx, leases[0].ID, original.ID)
 	if err != nil || lease.State != "used" {
 		t.Fatal("original lease affected by sharing", err)

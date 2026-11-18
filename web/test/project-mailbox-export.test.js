@@ -106,3 +106,11 @@ test("claimed leases are labeled but only direct shared associations can be remo
   assert.match(source, /if \(row\?\.source !== "shared" \|\| !sharedHasSelection\.value/);
   assert.match(source, /if \(e !== "cancel" && e !== "close"\) error\.value = e/);
 });
+
+test("bulk removal is scoped to the selected project and account and confirms its effect", async () => {
+  const source = await readFile(new URL("../src/views/PoolView.vue", import.meta.url), "utf8");
+  assert.match(source, /@click="removeAllSharedMailboxes"/);
+  assert.match(source, /原有独占领取、邮箱、邮件和凭据不会被删除/);
+  assert.match(source, /`\/pool\/projects\/\$\{encodeURIComponent\(clientID\)\}\/mailboxes\?` \+ query\(\{ account_id: accountID \}\), "DELETE"/);
+  assert.match(source, /已移除 \$\{result\.removed\} 个共用关联/);
+});

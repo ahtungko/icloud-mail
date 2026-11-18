@@ -39,6 +39,7 @@
 管理员在「邮箱池 → 项目共用邮箱」中选择项目和一个**已启用的 iCloud 主号**，点击「关联全部 HME」，即可将该主号下的隐藏邮箱关联到项目。操作结果显示当前关联总数 `linked` 和本次新增数 `added`；重复执行只补充尚未关联的邮箱。同一个邮箱可以同时关联多个项目。
 
 - 在列表中按项目和主号查看关联邮箱，来源「共用关联」表示主动建立的共享关系，可以点击「移除关联」撤销；来源「原有独占领取」来自该项目先前的 Pool lease，随原租约管理，不显示移除关联操作。移除共享关系只影响该项目的关联，不删除 Apple 隐藏邮箱、邮件或邮箱凭据。
+- 「移除全部共用关联」撤销所选项目与主号的全部共享关系（包括列表中暂时不可见的关联）；其他项目的关联及原有独占领取保留。移除后不再被共享或占用的邮箱可能重新进入可领取库存。
 - 「下载 TXT」会读取选定项目与主号下的**全部关联邮箱**（包括原有独占领取），文件名使用项目名称和主号邮箱，每行一个地址和一个绝对取码链接，不带表头：
 
   ```text
@@ -57,6 +58,7 @@
 | 查看关联 | `GET /pool/projects/:clientID/mailboxes` | `account_id=NUMBER&limit=NUMBER&offset=NUMBER` | `{"items":[{"alias_id":1,"account_id":2,"address":"alias@icloud.com","otp_url_path":"/api/v1/otp?token=DERIVED_TOKEN","source":"..."}],"total":1}` |
 | 关联全部 HME | `POST /pool/projects/:clientID/mailboxes` | `{"account_id":2}` | `{"linked":100,"added":20}` |
 | 移除关联 | `DELETE /pool/projects/:clientID/mailboxes/:aliasID` | 无 | `{"saved":true}` |
+| 批量移除共用关联 | `DELETE /pool/projects/:clientID/mailboxes` | `account_id=NUMBER` | `{"removed":NUMBER}` |
 
 这里的 `:clientID` 为项目标识，`:aliasID` 为隐藏邮箱标识；`account_id` 为 iCloud 主号的数字 ID。导出链接使用浏览器当前站点的 origin 与 `otp_url_path` 拼接，不使用项目 Pool Key 生成链接。
 

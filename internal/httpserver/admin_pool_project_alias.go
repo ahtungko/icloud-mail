@@ -79,3 +79,18 @@ func (s *Server) adminUnlinkPoolProjectMailbox(c *gin.Context) {
 	s.audit(c, nil, "admin", "pool_project_unshare", "alias", strconv.FormatInt(aliasID, 10), "success", "")
 	writeAdminAPIData(c, http.StatusOK, gin.H{"saved": true})
 }
+
+func (s *Server) adminUnlinkPoolProjectAccountMailboxes(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Query("account_id"), 10, 64)
+	if err != nil || accountID <= 0 {
+		s.poolError(c, store.ErrPoolInput)
+		return
+	}
+	removed, err := s.store.UnlinkPoolProjectAccountAliases(c.Request.Context(), c.Param("clientID"), accountID)
+	if err != nil {
+		s.poolError(c, err)
+		return
+	}
+	s.audit(c, nil, "admin", "pool_project_unshare_account", "account", strconv.FormatInt(accountID, 10), "success", "project="+c.Param("clientID")+" removed="+strconv.FormatInt(removed, 10))
+	writeAdminAPIData(c, http.StatusOK, gin.H{"removed": removed})
+}

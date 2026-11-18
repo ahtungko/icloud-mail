@@ -1098,7 +1098,7 @@ paths:
                             account_id: {type: integer}
                             address: {type: string, format: email}
                             source: {type: string, enum: [shared, claimed]}
-                            otp_url_path: {type: string, description: /api/v1/otp?token= 后跟当前邮箱的派生取件令牌}
+                            otp_url_path: {type: string, description: "/api/v1/otp?token= 后跟当前邮箱的派生取件令牌"}
         "401": {description: 管理员会话失效}
         "404": {description: 项目不存在}
     post:
@@ -1136,6 +1136,36 @@ paths:
         "401": {description: 管理员会话失效}
         "403": {description: CSRF 验证失败}
         "409": {description: 主号未启用或不是 iCloud 类型}
+    delete:
+      tags: [Mailbox Pool, Administration]
+      operationId: unlinkAccountMailboxesFromProject
+      summary: 移除所选项目与主号的全部共用关联
+      description: 移除该项目与主号下全部邮箱的显式共享登记，包括列表中暂时不可见的关联。原有独占领取和其他项目的关联保留。
+      security:
+        - adminSession: []
+      parameters:
+        - name: account_id
+          in: query
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/AdminCSRFToken"
+      responses:
+        "200":
+          description: 返回实际移除的关联数，没有匹配的关联时为零。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [removed]
+                    properties:
+                      removed: {type: integer, format: int64, minimum: 0}
+        "400": {description: 主号 ID 缺失或无效}
+        "401": {description: 管理员会话失效}
+        "403": {description: CSRF 验证失败}
   /api/v1/pool/projects/{clientID}/mailboxes/{aliasID}:
     servers:
       - url: https://HOST/{admin_path}

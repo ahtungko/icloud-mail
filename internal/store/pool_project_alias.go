@@ -138,6 +138,19 @@ func (s *Store) UnlinkPoolProjectAlias(ctx context.Context, clientID string, ali
 	return tx.Commit()
 }
 
+// UnlinkPoolProjectAccountAliases removes explicit associations only, including
+// associations hidden from the listing because an alias or account is disabled.
+func (s *Store) UnlinkPoolProjectAccountAliases(ctx context.Context, clientID string, accountID int64) (int64, error) {
+	if clientID == "" || accountID <= 0 {
+		return 0, ErrPoolInput
+	}
+	result, err := s.execContext(ctx, `DELETE FROM pool_project_aliases WHERE client_id=? AND alias_id IN (SELECT id FROM aliases WHERE account_id=?)`, clientID, accountID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (s *Store) poolAliasHasOtherProjectUsers(ctx context.Context, aliasID int64, clientID string) (bool, error) {
 	var exists bool
 	err := s.queryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pool_project_aliases

@@ -76,6 +76,66 @@ func TestPoolProjectSharingPreservesClaimsAndCredentials(t *testing.T) {
 	}
 }
 
+func TestBulkUnlinkPreservesOtherProjectsClaimsAndCredentials(t *testing.T) {
+	db, _, account, _, original := poolFixture(t, 2, "")
+	ctx := context.Background()
+	leases, err := db.ClaimPool(ctx, original.ID, store.PoolClaim{RequestID: "bulk-unlink-claim", Count: 1, AccountID: account.ID, TTLSeconds: 600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ActPoolLease(ctx, leases[0].ID, original.ID, "commit", 0); err != nil {
+		t.Fatal(err)
+	}
+	before, err := db.GetAlias(ctx, leases[0].AliasID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := db.CreatePoolClient(ctx, "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{original.ID, other.ID} {
+		if _, _, err = db.LinkPoolProjectAccountAliases(ctx, id, account.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := createAccount(t, ctx, db, "second account", "second-owner@icloud.com")
+	secondAlias, err := db.CreateAlias(ctx, domain.Alias{AccountID: second.ID, Address: "second-shared@icloud.com", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, added, err := db.LinkPoolProjectAccountAliases(ctx, original.ID, second.ID); err != nil || added != 1 {
+		t.Fatalf("link second account: added=%d err=%v", added, err)
+	}
+	removed, err := db.UnlinkPoolProjectAccountAliases(ctx, original.ID, account.ID)
+	if err != nil || removed != 2 {
+		t.Fatalf("removed=%d err=%v", removed, err)
+	}
+	page, err := db.ListPoolProjectAliases(ctx, original.ID, account.ID, 10, 0)
+	if err != nil || page.Total != 1 || page.Items[0].Source != "claimed" {
+		t.Fatalf("claim: %+v %v", page, err)
+	}
+	page, err = db.ListPoolProjectAliases(ctx, other.ID, account.ID, 10, 0)
+	if err != nil || page.Total != 2 {
+		t.Fatalf("other project: %+v %v", page, err)
+	}
+	after, err := db.GetAlias(ctx, before.ID)
+	secondPage, listErr := db.ListPoolProjectAliases(ctx, original.ID, second.ID, 10, 0)
+	if listErr != nil || len(secondPage.Items) != 1 || secondPage.Items[0].AliasID != secondAlias.ID || secondPage.Items[0].Source != "shared" {
+		t.Fatalf("second account association: %+v %v", secondPage, listErr)
+	}
+	if err != nil || after.CredentialVersion != before.CredentialVersion || after.CredentialCiphertext != before.CredentialCiphertext {
+		t.Fatalf("credentials changed: %v", err)
+	}
+	removed, err = db.UnlinkPoolProjectAccountAliases(ctx, original.ID, account.ID)
+	if err != nil || removed != 0 {
+		t.Fatalf("repeat removed=%d err=%v", removed, err)
+	}
+	if _, err = db.UnlinkPoolProjectAccountAliases(ctx, original.ID, 0); !errors.Is(err, store.ErrPoolInput) {
+		t.Fatalf("invalid account: %v", err)
+	}
+}
+
 func TestPoolProjectSharingRequiresEnabledProjectAndAccount(t *testing.T) {
 	db, _, account, _, original := poolFixture(t, 1, "")
 	ctx := context.Background()

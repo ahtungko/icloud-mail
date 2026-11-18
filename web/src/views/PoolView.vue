@@ -307,6 +307,13 @@
               @click="bindSharedMailboxes"
             >关联全部 HME</el-button>
             <el-button
+              type="danger"
+              plain
+              :icon="Delete"
+              :disabled="!sharedHasSelection || loading || sharedLoading || sharedExporting || busy"
+              @click="removeAllSharedMailboxes"
+            >移除全部共用关联</el-button>
+            <el-button
               :icon="Download"
               :loading="sharedExporting"
               :disabled="!sharedHasSelection || loading || sharedLoading || busy || sharedMailboxes.total === 0"
@@ -820,6 +827,22 @@ async function removeSharedMailbox(row) {
     await ElMessageBox.confirm(`移除 ${row.address} 与当前项目的共享关联？`, "移除关联", { type: "warning" });
     await request(`/pool/projects/${encodeURIComponent(sharedClientId.value)}/mailboxes/${encodeURIComponent(row.alias_id)}`, "DELETE");
     ElMessage.success("关联已移除");
+  });
+}
+async function removeAllSharedMailboxes() {
+  if (!sharedHasSelection.value || sharedExporting.value || sharedLoading.value) return;
+  await mutate(async () => {
+    const clientID = sharedClientId.value;
+    const accountID = Number(sharedAccountId.value);
+    const clientName = clients.value.find((client) => client.id === clientID)?.project || String(clientID);
+    const accountEmail = sharedAccounts.value.find((account) => account.id === sharedAccountId.value)?.email || String(accountID);
+    await ElMessageBox.confirm(
+      `移除项目「${clientName}」与主号「${accountEmail}」下全部邮箱的共用关联？原有独占领取、邮箱、邮件和凭据不会被删除。`,
+      "移除全部共用关联",
+      { type: "warning", confirmButtonText: "移除全部", cancelButtonText: "取消" },
+    );
+    const result = await request(`/pool/projects/${encodeURIComponent(clientID)}/mailboxes?` + query({ account_id: accountID }), "DELETE");
+    ElMessage.success(`已移除 ${result.removed} 个共用关联`);
   });
 }
 async function downloadSharedMailboxes() {
