@@ -85,7 +85,14 @@
                   @click="showCredentials(row.alias_id)"
                   >凭据</el-button
                 >
-                <el-button v-if="row.state === 'available' || row.state === 'used'" link type="primary" :disabled="!row.enabled" @click="openMemberOTP(row)">取码</el-button>
+                <el-button
+                  v-if="row.state === 'available' || row.state === 'used'"
+                  link
+                  type="primary"
+                  :disabled="!row.enabled || copyingMemberOTP"
+                  @click="copyMemberOTP(row)"
+                >取码</el-button>
+                <el-button v-if="row.state === 'available' || row.state === 'used'" link type="primary" :disabled="!row.enabled" @click="openMemberReceive(row)">收件</el-button>
                 <el-button v-if="row.state === 'used'" link type="primary" :disabled="!row.enabled" @click="openMemberAutoRotate(row)">自动轮换</el-button>
                 <el-button
                   v-if="row.state === 'available' || row.state === 'paused'"
@@ -573,11 +580,12 @@ import SectionHeader from "../components/SectionHeader.vue";
 import RequestAlert from "../components/RequestAlert.vue";
 import AutoRotateDialog from "../components/AutoRotateDialog.vue";
 import { buildOTPDirectLink, copyText } from "../utils/clipboard.js";
-import { buildAliasReceiveLink } from "../utils/aliasExport.js";
+import { buildAliasExportLine, buildAliasReceiveLink } from "../utils/aliasExport.js";
 import { createCheckboxDragSelection } from "../utils/checkboxDragSelection.js";
 import { buildProjectMailboxExportText, buildProjectMailboxFilename, collectProjectMailboxes } from "../utils/projectMailboxExport.js";
 
 const auth = useAuth();
+const copyingMemberOTP = ref(false);
 const autoRotateOpen = ref(false), autoRotateAlias = ref(null);
 let autoRotateReadTicket = 0;
 const tab = ref("members"),
@@ -1146,10 +1154,26 @@ async function fetchMemberAlias(id) {
   const result = await request(`/aliases/${encodeURIComponent(id)}`);
   return normalizeAlias(result.alias || result);
 }
-async function openMemberOTP(row) {
+async function copyMemberOTP(row) {
+  if (copyingMemberOTP.value) return;
+  copyingMemberOTP.value = true;
+  error.value = null;
+  try {
+    const alias = await fetchMemberAlias(row.alias_id);
+    if (!await copyText(buildAliasExportLine(alias))) {
+      throw new Error("复制失败，请检查浏览器剪切板权限后重试。");
+    }
+    ElMessage.success("取码链接格式已复制。");
+  } catch (e) {
+    error.value = e;
+  } finally {
+    copyingMemberOTP.value = false;
+  }
+}
+async function openMemberReceive(row) {
   const popup = window.open("", "_blank");
   if (!popup) {
-    ElMessage.error("无法打开取码窗口，请允许弹出窗口后重试。");
+    ElMessage.error("无法打开收件窗口，请允许弹出窗口后重试。");
     return;
   }
   popup.opener = null;
