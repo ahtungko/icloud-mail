@@ -1,8 +1,8 @@
-ARG DOCKER_HUB_MIRROR=docker.m.daocloud.io
+ARG DOCKER_HUB_MIRROR=docker.io
 
 FROM ${DOCKER_HUB_MIRROR}/library/postgres:17-alpine AS postgres-runtime
 
-ARG ALPINE_MIRROR=mirrors.aliyun.com
+ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
 RUN sed -i "s#dl-cdn.alpinelinux.org#${ALPINE_MIRROR}#g" /etc/apk/repositories \
     && apk add --no-cache util-linux
 
@@ -19,9 +19,9 @@ RUN sed -i 's/\r$//' \
 ENTRYPOINT ["/usr/local/bin/icloud-api-postgres-entrypoint"]
 CMD ["postgres"]
 
-FROM ${DOCKER_HUB_MIRROR}/library/node:22-alpine AS web-builder
+FROM --platform=$BUILDPLATFORM ${DOCKER_HUB_MIRROR}/library/node:22-alpine AS web-builder
 
-ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG NPM_REGISTRY=https://registry.npmjs.org
 
 WORKDIR /src/web
 
@@ -33,9 +33,11 @@ RUN NODE_OPTIONS=--max-old-space-size=512 npm run build
 COPY scripts/collect-npm-notices.mjs /tmp/collect-npm-notices.mjs
 RUN node /tmp/collect-npm-notices.mjs /out/licenses/npm
 
-FROM ${DOCKER_HUB_MIRROR}/library/golang:1.26-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM ${DOCKER_HUB_MIRROR}/library/golang:1.26-alpine AS go-builder
 
-ARG GOPROXY=https://goproxy.cn
+ARG GOPROXY=https://proxy.golang.org,direct
+ARG TARGETOS
+ARG TARGETARCH
 ENV GOPROXY=${GOPROXY} \
     GOTOOLCHAIN=local
 
@@ -45,16 +47,16 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN GOMAXPROCS=2 GOMEMLIMIT=512MiB CGO_ENABLED=0 GOOS=linux go build -p 2 \
+RUN GOMAXPROCS=2 GOMEMLIMIT=512MiB CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -p 2 \
     -trimpath \
     -ldflags="-s -w" \
     -o /out/icloud-api \
     ./cmd/icloud-api
-RUN GOMAXPROCS=2 GOMEMLIMIT=512MiB sh scripts/collect-go-notices.sh /out/licenses/go
+RUN GOMAXPROCS=2 GOMEMLIMIT=512MiB CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} sh scripts/collect-go-notices.sh /out/licenses/go
 
 FROM ${DOCKER_HUB_MIRROR}/library/alpine:3.22 AS runtime
 
-ARG ALPINE_MIRROR=mirrors.aliyun.com
+ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
 RUN sed -i "s#dl-cdn.alpinelinux.org#${ALPINE_MIRROR}#g" /etc/apk/repositories \
     && apk add --no-cache ca-certificates tzdata util-linux \
     && addgroup -S -g 10001 app \
