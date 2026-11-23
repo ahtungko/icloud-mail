@@ -22,6 +22,57 @@ type aliasDeletionMockClock struct {
 	delays []time.Duration
 }
 
+func TestDeleteAliasesItemIntervalIsAppliedBetweenAliases(t *testing.T) {
+	f := newAliasDeletionRecoveryFixture(t, 2)
+	ctx := WithAliasDeletionRecovery(context.Background(), nil)
+	ctx = WithAliasDeletionItemInterval(ctx, 30*time.Second)
+	if _, err := f.service.DeleteAliases(ctx, f.ids); err != nil {
+		t.Fatalf("DeleteAliases: %v", err)
+	}
+	f.clock.mu.Lock()
+	defer f.clock.mu.Unlock()
+	for _, delay := range f.clock.delays {
+		if delay == 30*time.Second {
+			return
+		}
+	}
+	t.Fatalf("expected 30s inter-item wait, got %v", f.clock.delays)
+}
+
+func TestDeleteAliasesItemIntervalHonorsCancellation(t *testing.T) {
+	f := newAliasDeletionRecoveryFixture(t, 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	firstRemote := f.directory.Aliases[0].AnonymousID
+	WithAliasDeletionWaiter(func(ctx context.Context, delay time.Duration) error {
+		if delay == 2*time.Second {
+			if len(f.service.locker.(*fakeAcquiringLocker).token) != 1 {
+				t.Error("account lock still held during inter-item wait")
+			}
+			cancel()
+		}
+		return f.clock.wait(ctx, delay)
+	})(f.service)
+	ctx = WithAliasDeletionRecovery(ctx, nil)
+	ctx = WithAliasDeletionItemInterval(ctx, 2*time.Second)
+	outcomes, err := f.service.DeleteAliases(ctx, f.ids)
+	if err != nil || len(outcomes) != 2 || outcomes[0].Err != nil || !errors.Is(outcomes[1].Err, context.Canceled) || Code(outcomes[1].Err) != CodeBatchNotStarted {
+		t.Fatalf("partial outcomes = %v, batch error = %v", outcomes, err)
+	}
+	var deletes []string
+	for _, call := range f.calls {
+		if call.operation == "delete" {
+			deletes = append(deletes, call.remoteID)
+		}
+		if call.remoteID != "" && call.remoteID != firstRemote {
+			t.Fatalf("unexpected request for second alias: %v", call)
+		}
+	}
+	if !reflect.DeepEqual(deletes, []string{firstRemote}) {
+		t.Fatalf("remote delete calls = %v", deletes)
+	}
+}
+
 func (c *aliasDeletionMockClock) now() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -519,7 +570,13 @@ func TestAliasDeletionRecoveryFatalFailuresNeverResume(t *testing.T) {
 			}
 			waits := 0
 			ctx := WithAliasDeletionRecovery(context.Background(), func(state AliasDeletionWait) { waits++ })
+			ctx = WithAliasDeletionItemInterval(ctx, 2*time.Second)
 			out, err := f.service.DeleteAliases(ctx, f.ids)
+			for _, delay := range f.clock.delays {
+				if delay == 2*time.Second {
+					t.Fatal("stopped account waited between aliases")
+				}
+			}
 			wantWaits := 0
 			if scenario == "credentials" || scenario == "terms" {
 				wantWaits = 2 // The existing confirmation read must honor its server hint.

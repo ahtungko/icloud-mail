@@ -11,6 +11,9 @@ import (
 	"icloud-api/internal/store"
 )
 
+// CodeBatchNotStarted identifies remaining aliases after an inter-item wait was interrupted.
+const CodeBatchNotStarted = "BATCH_DELETE_NOT_STARTED"
+
 // CodeBatchDeferred identifies items which were not attempted after an account's
 // recovery budget was exhausted. Its cause can still identify the Apple throttle.
 const CodeBatchDeferred = "APPLE_BATCH_DEFERRED"
@@ -39,6 +42,21 @@ type AliasDeletionWait struct {
 }
 
 type aliasDeletionRecoveryKey struct{}
+type aliasDeletionItemIntervalKey struct{}
+
+// WithAliasDeletionItemInterval adds a cancellable pause between adjacent
+// aliases in each Apple-account batch. It does not affect request pacing.
+func WithAliasDeletionItemInterval(ctx context.Context, interval time.Duration) context.Context {
+	if interval <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, aliasDeletionItemIntervalKey{}, interval)
+}
+
+func aliasDeletionItemInterval(ctx context.Context) time.Duration {
+	interval, _ := ctx.Value(aliasDeletionItemIntervalKey{}).(time.Duration)
+	return interval
+}
 
 // WithAliasDeletionRecovery opts DeleteAliases into paced, bounded throttle
 // recovery. DeleteAlias and batches without this context retain their original

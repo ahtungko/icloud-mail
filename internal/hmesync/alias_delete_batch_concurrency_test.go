@@ -271,6 +271,15 @@ func TestDeleteAliasesHoldsOperationLockAcrossProgressAndCancelsWaiters(t *testi
 	if err != nil || len(waiterOut) != 1 || !errors.Is(waiterOut[0].Err, context.DeadlineExceeded) {
 		t.Error("same-account batch bypassed operation lock")
 	}
+	if Code(waiterOut[0].Err) == CodeBatchNotStarted {
+		t.Fatal("legacy batch cancellation changed")
+	}
+	pacedCtx, cancelPaced := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancelPaced()
+	queued, err := service.DeleteAliases(WithAliasDeletionItemInterval(pacedCtx, 2*time.Second), ids[2:])
+	if err != nil || len(queued) != 1 || Code(queued[0].Err) != CodeBatchNotStarted || !errors.Is(queued[0].Err, context.DeadlineExceeded) {
+		t.Fatalf("queued account: outcomes=%v err=%v", queued, err)
+	}
 	singleCtx, cancelSingle := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancelSingle()
 	if err := service.DeleteAlias(singleCtx, ids[2]); !errors.Is(err, context.DeadlineExceeded) {
@@ -333,5 +342,45 @@ func TestDeleteAliasesRechecksOwnershipAndPendingUnderAccountLock(t *testing.T) 
 				t.Error("stale local ownership/pending/identity snapshot caused deletion")
 			}
 		})
+	}
+}
+
+func TestItemIntervalYieldsSlotsToThirdAccount(t *testing.T) {
+	base := newFakeRepository(domain.Account{}, time.Now())
+	locker := &aliasDeletionKeyedLocker{}
+	service := newTestService(t, base, &fakeAppleClient{}, locker, time.Now)
+	var ids []int64
+	for account := int64(1); account <= 3; account++ {
+		for _, id := range []int64{account * 10, account*10 + 1} {
+			base.addAlias(domain.Alias{ID: id, AccountID: account, LastSyncError: domain.AppleAliasConfirmationPending})
+			ids = append(ids, id)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var waiting atomic.Int32
+	allWaiting := make(chan struct{})
+	WithAliasDeletionWaiter(func(ctx context.Context, delay time.Duration) error {
+		if delay != 2*time.Second {
+			t.Errorf("unexpected wait: %v", delay)
+		}
+		if waiting.Add(1) == 3 {
+			locker.mu.Lock()
+			if len(locker.held) != 0 {
+				t.Errorf("account locks held during waits: %v", locker.held)
+			}
+			locker.mu.Unlock()
+			close(allWaiting)
+		}
+		select {
+		case <-allWaiting:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})(service)
+	_, err := service.DeleteAliases(WithAliasDeletionItemInterval(ctx, 2*time.Second), ids)
+	if err != nil || ctx.Err() != nil || waiting.Load() != 3 {
+		t.Fatalf("three account groups did not enter wait with two slots: waits=%d err=%v ctx=%v", waiting.Load(), err, ctx.Err())
 	}
 }

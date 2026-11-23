@@ -55,15 +55,26 @@
             <el-button type="primary" @click="openEnroll"
               >加入已有邮箱</el-button
             >
+            <el-button
+              :disabled="!memberOTPSelected.length || copyingMemberOTP"
+              :loading="copyingMemberOTP"
+              @click="copySelectedMemberOTPs"
+            >批量取码（{{ memberOTPSelected.length }}）</el-button>
+            <el-button :disabled="!memberSelected.length" @click="copySelectedMemberAddresses">复制所选邮箱地址（{{ memberSelected.length }}）</el-button>
+            <el-button :disabled="!memberSelected.length || bulkLabelSaving" @click="bulkLabelOpen = true">批量标注（{{ memberSelected.length }}）</el-button>
+            <el-button :disabled="!bulkRotateEligibleCount || copyingMemberOTP || bulkRotateSaving" @click="openBulkRotate">批量自动轮换（{{ bulkRotateEligibleCount }}）</el-button>
           </div>
           <div class="pool-table-scroll" role="region" aria-label="邮箱库存列表" tabindex="0"><el-table
             :data="members.items"
             v-loading="loading"
             class="pool-table"
             empty-text="暂无库存。添加主号后，可加入已有邮箱或开启新邮箱自动入池。"
+            @selection-change="onMemberSelectionChange"
           >
+            <el-table-column type="selection" width="48" />
             <el-table-column prop="address" label="邮箱" min-width="245" />
             <el-table-column prop="group_name" label="分组" min-width="110" />
+            <el-table-column prop="label" label="用途备注" min-width="140" show-overflow-tooltip />
             <el-table-column label="状态" width="135"
               ><template #default="{ row }"
                 ><el-tag :type="stateType(row.state)">{{
@@ -106,6 +117,7 @@
               </template></el-table-column
             >
           ></el-table></div>
+          <div v-if="memberSelected.length" class="pool-selection-hint">已选 {{ memberSelected.length }} 个邮箱，可复制地址到主号管理；取码与自动轮换仅处理符合条件的邮箱</div>
           <el-pagination
             v-model:current-page="memberPage"
             :page-size="50"
@@ -569,7 +581,17 @@ grant_type=refresh_token&amp;client_id=CLIENT_ID&amp;refresh_token=REFRESH_TOKEN
           ><el-button @click="secretOpen = false">关闭</el-button></template
         >
       </el-dialog>
+      <el-dialog v-model="bulkLabelOpen" title="批量标注用途备注" width="min(480px,94vw)" :close-on-click-modal="false" :show-close="!bulkLabelSaving" :close-on-press-escape="!bulkLabelSaving">
+        <p>将覆盖选中邮箱原有的用途备注；留空则清除备注。</p>
+        <el-input v-model="bulkLabelText" maxlength="100" show-word-limit placeholder="例如：送人了" :disabled="bulkLabelSaving" />
+        <template #footer><el-button :disabled="bulkLabelSaving" @click="bulkLabelOpen = false">取消</el-button><el-button type="primary" :loading="bulkLabelSaving" @click="submitBulkLabel">保存</el-button></template>
+      </el-dialog>
       <AutoRotateDialog v-model="autoRotateOpen" :alias="autoRotateAlias" :csrf-token="auth.state.csrfToken" @updated="autoRotateAlias = $event" />
+      <el-dialog v-model="bulkRotateOpen" title="批量设置凭证自动轮换" width="min(520px,94vw)" :close-on-click-modal="false" :show-close="!bulkRotateSaving" :close-on-press-escape="!bulkRotateSaving">
+        <el-alert type="info" :closable="false" show-icon>已选中 {{ bulkRotateEligibleCount }} 个已启用、已使用的邮箱；旧版凭据无法设置，将在结果中列出。重新设置会清空已有倒计时并等待新验证码；关闭也会清空倒计时。</el-alert>
+        <el-form label-position="top" style="margin-top:16px" :disabled="bulkRotateSaving"><el-form-item label="接码后自动轮换时长"><el-radio-group v-model="bulkRotateOption"><el-radio-button :value="0">关闭</el-radio-button><el-radio-button :value="30">30 分钟</el-radio-button><el-radio-button :value="60">60 分钟</el-radio-button><el-radio-button :value="120">120 分钟</el-radio-button><el-radio-button value="custom">自定义</el-radio-button></el-radio-group></el-form-item><template v-if="bulkRotateOption === 'custom'"><el-input-number v-model="bulkRotateCustom" :min="1" :max="10080" :step="10" /> 分钟</template></el-form>
+        <template #footer><el-button :disabled="bulkRotateSaving" @click="bulkRotateOpen=false">取消</el-button><el-button type="primary" :loading="bulkRotateSaving" @click="submitBulkRotate">应用到 {{ bulkRotateEligibleCount }} 个邮箱</el-button></template>
+      </el-dialog>
     </section>
   </el-config-provider>
 </template>
@@ -580,7 +602,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { Delete, Download, Link } from "@element-plus/icons-vue";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { apiRequest } from "../api/client.js";
-import { getAliasPage, getAllAliases, getAllAccounts, normalizeAlias } from "../api/admin.js";
+import { getAliasPage, getAllAliases, getAllAccounts, normalizeAlias, setAliasAutoRotate } from "../api/admin.js";
 import { mergePoolPageSelection, poolAliasSelectable, submitPoolEnrollment } from "../utils/poolEnrollment.js";
 import { useAuth } from "../stores/auth.js";
 import SectionHeader from "../components/SectionHeader.vue";
@@ -593,6 +615,11 @@ import { buildProjectMailboxExportText, buildProjectMailboxFilename, collectProj
 
 const auth = useAuth();
 const copyingMemberOTP = ref(false);
+const memberSelected = ref([]);
+const bulkLabelOpen = ref(false), bulkLabelSaving = ref(false), bulkLabelText = ref("");
+const memberOTPSelected = computed(() => memberSelected.value.filter(isMemberOTPAvailable));
+const bulkRotateOpen = ref(false), bulkRotateSaving = ref(false), bulkRotateOption = ref(30), bulkRotateCustom = ref(30);
+const bulkRotateEligibleCount = computed(() => memberSelected.value.filter((row) => row?.enabled && row.state === "used").length);
 const autoRotateOpen = ref(false), autoRotateAlias = ref(null);
 let autoRotateReadTicket = 0;
 const tab = ref("members"),
@@ -1193,6 +1220,93 @@ async function copyMemberOTP(row) {
     copyingMemberOTP.value = false;
   }
 }
+function openBulkRotate() { if (bulkRotateEligibleCount.value) bulkRotateOpen.value = true; }
+async function submitBulkRotate() {
+  if (bulkRotateSaving.value) return;
+  const minutes = Number(bulkRotateOption.value === "custom" ? bulkRotateCustom.value : bulkRotateOption.value);
+  if (!Number.isInteger(minutes) || minutes < 0 || minutes > 10080 || (bulkRotateOption.value === "custom" && minutes < 1)) {
+    ElMessage.error("轮换时间必须是 1 到 10080 分钟的整数，或选择关闭。");
+    return;
+  }
+  const rows = memberSelected.value.filter((row) => row?.enabled && row.state === "used");
+  if (!rows.length) return;
+  bulkRotateSaving.value = true;
+  try {
+    const confirmed = await ElMessageBox.confirm(
+      `将对 ${rows.length} 个邮箱应用设置。重新设置会清空已有倒计时并等待新验证码；关闭也会清空倒计时，是否继续？`,
+      "确认批量设置",
+      { type: "warning", confirmButtonText: "继续", cancelButtonText: "取消" },
+    ).catch(() => false);
+    if (!confirmed) return;
+    let success = 0;
+    const failed = [];
+    for (const row of rows) {
+      try {
+        const alias = await fetchMemberAlias(row.alias_id);
+        if (alias.credentialMode !== "v2") throw new Error("旧版凭据不支持自动轮换");
+        await setAliasAutoRotate(alias.id, minutes, auth.state.csrfToken);
+        success++;
+      } catch (e) {
+        failed.push(`${row.address}: ${e?.message || "失败"}`);
+      }
+    }
+    bulkRotateOpen.value = false;
+    if (failed.length) {
+      await ElMessageBox.alert(`成功 ${success} 个，失败 ${failed.length} 个。\n${failed.join("\n")}`, "批量设置结果", { type: "warning", customClass: "bulk-rotate-result" });
+    } else {
+      ElMessage.success(`已为 ${success} 个邮箱${minutes ? "设置" : "关闭"}自动轮换`);
+    }
+  } finally {
+    bulkRotateSaving.value = false;
+  }
+}
+function isMemberOTPAvailable(row) {
+  return Boolean(row?.enabled && (row.state === "available" || row.state === "used"));
+}
+function onMemberSelectionChange(rows) {
+  memberSelected.value = rows;
+}
+async function submitBulkLabel() {
+  if (bulkLabelSaving.value || !memberSelected.value.length) return;
+  const rows = [...memberSelected.value];
+  const label = bulkLabelText.value.trim();
+  if ([...label].length > 100) { ElMessage.error("用途备注不能超过 100 个字符。"); return; }
+  bulkLabelSaving.value = true;
+  const failed = [];
+  try {
+    for (const row of rows) {
+      try { await request(`/aliases/${encodeURIComponent(row.alias_id)}`, "PATCH", { label }); }
+      catch (e) { failed.push(`${row.address}: ${e?.message || "保存失败"}`); }
+    }
+    bulkLabelOpen.value = false;
+    await loadMembers();
+    if (failed.length) await ElMessageBox.alert(`成功 ${rows.length - failed.length} 个，失败 ${failed.length} 个。\n${failed.join("\n")}`, "批量标注结果", { type: "warning", customClass: "bulk-rotate-result" });
+    else ElMessage.success(`已标注 ${rows.length} 个邮箱。`);
+  } finally { bulkLabelSaving.value = false; }
+}
+async function copySelectedMemberAddresses() {
+  try {
+    const addresses = memberSelected.value.map((row) => String(row.address || "").trim());
+    if (addresses.some((address) => !address || /[\r\n]/.test(address))) throw new Error("邮箱地址格式无效，请刷新后重试。");
+    if (!await copyText(addresses.join("\r\n"))) throw new Error("复制失败，请检查浏览器剪切板权限后重试。");
+    ElMessage.success(`已复制 ${addresses.length} 个邮箱地址，可粘贴到对应主号管理页面。`);
+  } catch (e) { error.value = e; }
+}
+async function copySelectedMemberOTPs() {
+  if (copyingMemberOTP.value || !memberOTPSelected.value.length) return;
+  copyingMemberOTP.value = true;
+  error.value = null;
+  try {
+    const aliases = await Promise.all(memberOTPSelected.value.map((row) => fetchMemberAlias(row.alias_id)));
+    const content = aliases.map((alias) => buildAliasExportLine(alias)).join("\r\n");
+    if (!await copyText(content)) throw new Error("复制失败，请检查浏览器剪切板权限后重试。");
+    ElMessage.success(`已复制${aliases.length} 个邮箱的取码链接。`);
+  } catch (e) {
+    error.value = e;
+  } finally {
+    copyingMemberOTP.value = false;
+  }
+}
 async function openMemberReceive(row) {
   const popup = window.open("", "_blank");
   if (!popup) {
@@ -1259,6 +1373,7 @@ onMounted(() => refresh(true));
 </script>
 
 <style scoped>
+:global(.bulk-rotate-result .el-message-box__message) { white-space: pre-line; overflow-wrap: anywhere; }
 .pool-page {
   min-width: 0;
 }

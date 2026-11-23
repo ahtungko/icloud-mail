@@ -161,18 +161,28 @@ func (s *Service) DeleteAliases(ctx context.Context, aliasIDs []int64) ([]AliasD
 			// Recover inside the goroutine: an HTTP caller's recovery boundary
 			// cannot catch worker panics. Defers release both account locks first.
 			if err, panicked := runAliasDeletionSafely(func() error {
+				enteredAccount := false
 				err, panicked := runAliasDeletionSafely(func() error {
 					return s.withAliasDeletionAccount(ctx, group.accountID, slots, func(waitCooldown func(context.Context, time.Duration) error) error {
+						enteredAccount = true
 						batch := aliasDeletionBatch{s: s, repo: deleteRepo, client: deleteClient, accountID: group.accountID, waitCooldown: waitCooldown}
 						batch.recovery = newAliasDeletionRecovery(ctx)
-						for _, item := range group.items {
+						itemInterval := aliasDeletionItemInterval(ctx)
+						for index, item := range group.items {
 							complete(item, batch.delete(ctx, item.aliasID))
+							if batch.stopped == nil && index+1 < len(group.items) && itemInterval > 0 {
+								if err := waitCooldown(ctx, itemInterval); err != nil {
+									return wrapError(CodeBatchNotStarted, err, nil)
+								}
+							}
 						}
 						return nil
 					})
 				})
 				if panicked {
 					fail(err)
+				} else if !enteredAccount && aliasDeletionItemInterval(ctx) > 0 && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+					err = wrapError(CodeBatchNotStarted, err, nil)
 				}
 				for _, item := range group.items {
 					if !completed[item.index] {

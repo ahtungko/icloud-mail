@@ -342,6 +342,17 @@ func TestAliasDeletionJobProgressFailureStopsFurtherWork(t *testing.T) {
 func TestAliasDeletionJobStartupInterruptsWithoutReplaying(t *testing.T) {
 	env := newAdminAPITestEnv(t)
 	cookie, _, admin := env.createSession(t, "async-restart-admin", "unused-password")
+	var deleteCalls atomic.Int32
+	env.server.SetHMESyncService(&fakeHMESyncService{
+		deleteAlias: func(context.Context, int64) error {
+			deleteCalls.Add(1)
+			return errors.New("unexpected single delete during startup")
+		},
+		deleteAliases: func(context.Context, []int64) ([]hmesync.AliasDeletionOutcome, error) {
+			deleteCalls.Add(1)
+			return nil, errors.New("unexpected startup replay")
+		},
+	})
 	job := domain.AliasDeletionJob{
 		ID: testAliasDeletionJobID, AdminID: admin.ID, Status: domain.AliasDeletionJobRunning,
 		Items: []domain.AliasDeletionJobItem{
@@ -352,11 +363,20 @@ func TestAliasDeletionJobStartupInterruptsWithoutReplaying(t *testing.T) {
 	if err := env.store.CreateAliasDeletionJob(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}
-	startTestAliasDeletionJobs(t, env)
+	stop, done := startTestAliasDeletionJobs(t, env)
+	interrupted := waitTestAliasDeletionJob(t, env, admin.ID, testAliasDeletionJobID)
 	response := env.request(t, http.MethodGet, "/admin/api/v1/aliases/batch/jobs/latest", nil, "", []*http.Cookie{cookie}, "")
 	result := decodeTestAliasDeletionJob(t, response)
-	if response.Code != http.StatusOK || result.Status != domain.AliasDeletionJobInterrupted || result.Deleted != 1 || result.Processed != 1 || result.Results[1].LocalRetained {
+	stop()
+	waitTestAliasDeletionSignal(t, done)
+	if calls := deleteCalls.Load(); calls != 0 {
+		t.Fatalf("startup made %d delete calls", calls)
+	}
+	if len(result.Results) != 2 || response.Code != http.StatusOK || result.Status != domain.AliasDeletionJobInterrupted || result.Deleted != 1 || result.Processed != 1 || result.Results[1].LocalRetained || interrupted.Status != domain.AliasDeletionJobInterrupted {
 		t.Fatalf("restart result = %d %#v", response.Code, result)
+	}
+	if len(result.Results) != 2 || result.Results[0].Code != "" || result.Results[1].Code != "BATCH_DELETE_INTERRUPTED" {
+		t.Fatalf("restart item codes = %#v", result.Results)
 	}
 }
 

@@ -56,6 +56,7 @@ type AliasPage struct {
 // current group.
 type AliasAdminStateUpdate struct {
 	Enabled        *bool
+	Label          *string
 	GroupID        *int64
 	GroupIDPresent bool
 }
@@ -481,13 +482,13 @@ func (s *Store) UpdateAliasAdminState(
 	id int64,
 	update AliasAdminStateUpdate,
 ) (domain.Alias, error) {
-	if update.Enabled == nil && !update.GroupIDPresent {
+	if update.Enabled == nil && update.Label == nil && !update.GroupIDPresent {
 		return domain.Alias{}, errors.New("update alias admin state: no changes requested")
 	}
 	if err := s.updateAliasState(
 		ctx,
 		id,
-		nil,
+		update.Label,
 		update.Enabled,
 		update.GroupID,
 		update.GroupIDPresent,

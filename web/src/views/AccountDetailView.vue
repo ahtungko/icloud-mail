@@ -505,8 +505,13 @@
             type="danger"
             :disabled="!selectedAliasIds.length || loading || detailMutationPending()"
             :loading="batchDeleteConfirming || deletionState.submitting"
-            @click="deleteSelectedAliases"
+            @click="deleteSelectedAliases()"
           >从 iCloud 永久删除隐藏邮箱</el-button>
+          <el-button
+            v-if="!isCustomMailbox"
+            :disabled="loading || detailMutationPending()"
+            @click="openAliasImportDelete"
+          >粘贴地址批量删除</el-button>
         </div>
 
         <AliasDeletionProgress
@@ -515,6 +520,19 @@
           @refresh="refreshDeletionJob"
           @acknowledge="acknowledgeDeletionState"
         />
+        <el-dialog v-model="aliasImportDeleteVisible" title="粘贴邮箱地址批量删除" width="min(560px, 94vw)" :close-on-click-modal="false">
+          <el-alert type="warning" :closable="false" show-icon>
+            这些邮箱及其凭据、邮件归档会从本地清除；如果邮箱属于库存或已有领取记录，相关池记录也会失去关联。Apple 删除不可恢复。
+          </el-alert>
+          <el-input v-model="aliasImportDeleteText" type="textarea" :rows="10" placeholder="每行一个邮箱地址" style="margin-top: 14px" />
+          <p v-if="aliasImportDeletePreview" class="alias-import-delete-preview">匹配 {{ aliasImportDeletePreview.matched.length }} 个，未匹配 {{ aliasImportDeletePreview.missing.length }} 个，不可处理 {{ aliasImportDeletePreview.blocked.length }} 个</p>
+          <p v-if="aliasImportDeletePreview?.missing.length" class="alias-import-delete-missing">未匹配：{{ aliasImportDeletePreview.missing.join("、") }}</p>
+          <p v-if="aliasImportDeletePreview?.blocked.length" class="alias-import-delete-missing">不可处理（等待 Apple 确认）：{{ aliasImportDeletePreview.blocked.join("、") }}</p>
+          <template #footer>
+            <el-button @click="aliasImportDeleteVisible = false">取消</el-button>
+            <el-button type="danger" :loading="aliasImportDeleteLoading" :disabled="aliasImportDeleteLoadingCandidates || !aliasImportDeletePreview?.matched.length" @click="submitAliasImportDelete">删除匹配邮箱</el-button>
+          </template>
+        </el-dialog>
         <div
           v-if="loading && aliases.length === 0"
           class="data-panel loading-panel"
@@ -1076,6 +1094,22 @@ const aliasQueryDraft = ref("");
 const appliedAliasQuery = ref("");
 const aliasEnabledFilter = ref("");
 const selectedAliasRecords = ref(new Map());
+const aliasImportDeleteVisible = ref(false);
+const aliasImportDeleteText = ref("");
+const aliasImportDeleteLoading = ref(false);
+const aliasImportDeleteLoadingCandidates = ref(false);
+const aliasImportDeleteAccountKey = ref("");
+const aliasImportDeleteCandidates = ref([]);
+const aliasImportDeletePreview = computed(() => {
+  const addresses = [...new Set(aliasImportDeleteText.value.split(/\r?\n/).map((value) => value.trim().toLowerCase()).filter(Boolean))];
+  if (!addresses.length) return null;
+  const byAddress = new Map(aliasImportDeleteCandidates.value.map((alias) => [String(alias.address || "").trim().toLowerCase(), alias]));
+  const existing = addresses.map((address) => byAddress.get(address)).filter(Boolean);
+  const matched = existing.filter((alias) => !isAliasConfirmationPending(alias));
+  const blocked = existing.filter((alias) => isAliasConfirmationPending(alias)).map((alias) => alias.address);
+  const missing = addresses.filter((address) => !byAddress.has(address));
+  return { matched, missing, blocked };
+});
 const selectedAliasIds = computed(() => [...selectedAliasRecords.value.keys()]);
 const aliasSelectionContainer = ref(null);
 const aliasSelectionActive = ref(false);
@@ -1574,9 +1608,9 @@ function applyAliasEnabledFilter() {
   resetAliasSearchResults();
 }
 
-async function deleteSelectedAliases() {
+async function deleteSelectedAliases(importedIds = null) {
   if (!viewActive || !auth.state.username || isCustomMailbox.value || loading.value || detailMutationPending()) return;
-  const ids = [...selectedAliasIds.value];
+  const ids = [...(importedIds ?? selectedAliasIds.value)];
   if (!ids.length) return;
   const controller = deletionController;
   const username = auth.state.username;
@@ -1597,13 +1631,51 @@ async function deleteSelectedAliases() {
     );
     if (!viewActive || controller !== deletionController || username !== auth.state.username ||
         contextKey !== detailRequestKey() || deletionState.value.blocked ||
-        ids.length !== selectedAliasIds.value.length || !ids.every((id) => selectedAliasRecords.value.has(id))) return;
+        (!importedIds && (ids.length !== selectedAliasIds.value.length || !ids.every((id) => selectedAliasRecords.value.has(id))))) return;
     await controller.submit(ids, auth.state.csrfToken);
   } catch (error) {
     if (!confirmationCancelled(error)) showRequestError(error, "批量删除提交失败。");
   } finally {
     batchDeleteConfirming.value = false;
     if (viewActive) void loadDetail({ silent: true });
+  }
+}
+
+async function openAliasImportDelete() {
+  if (aliasImportDeleteLoadingCandidates.value) return;
+  aliasImportDeleteText.value = "";
+  const accountKey = detailRouteKey();
+  aliasImportDeleteAccountKey.value = accountKey;
+  aliasImportDeleteLoadingCandidates.value = true;
+  try {
+    const candidates = await getAllAliases(accountKey, { withoutLatestMail: true });
+    if (aliasImportDeleteAccountKey.value !== detailRouteKey()) return;
+    aliasImportDeleteCandidates.value = candidates;
+    aliasImportDeleteVisible.value = true;
+  } catch (error) {
+    showRequestError(error, "加载邮箱列表失败，请稍后重试。");
+  } finally {
+    aliasImportDeleteLoadingCandidates.value = false;
+  }
+}
+
+async function submitAliasImportDelete() {
+  if (aliasImportDeleteAccountKey.value !== detailRouteKey()) return;
+  const matched = aliasImportDeletePreview.value?.matched || [];
+  if (!matched.length || aliasImportDeleteLoading.value) return;
+  const ids = matched.map((alias) => alias.id);
+  const confirmed = await ElMessageBox.confirm(
+    `将从 iCloud 永久删除匹配的 ${ids.length} 个邮箱，并清除本地凭据、邮件归档和可能存在的库存关联。此操作不可恢复，是否继续？`,
+    "确认批量永久删除",
+    { type: "warning", confirmButtonText: "永久删除", cancelButtonText: "取消", confirmButtonClass: "el-button--danger" },
+  ).catch(() => false);
+  if (!confirmed || aliasImportDeleteAccountKey.value !== detailRouteKey() || !viewActive) return;
+  aliasImportDeleteLoading.value = true;
+  try {
+    aliasImportDeleteVisible.value = false;
+    await deleteSelectedAliases(ids);
+  } finally {
+    aliasImportDeleteLoading.value = false;
   }
 }
 

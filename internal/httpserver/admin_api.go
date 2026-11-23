@@ -161,31 +161,31 @@ type adminAPISyncProgressDTO struct {
 }
 
 type adminAPIAliasDTO struct {
-	ID                int64   `json:"id"`
-	AccountID         int64   `json:"account_id"`
-	AccountEmail      string  `json:"account_email"`
-	Address           string  `json:"address"`
-	Label             string  `json:"label"`
-	GroupID           *int64  `json:"group_id"`
-	GroupName         string  `json:"group_name"`
-	APIKeyPrefix      string  `json:"api_key_prefix"`
-	DirectLinkPath    string  `json:"direct_link_path"`
-	APIKey            string  `json:"api_key"`
-	IMAPPassword      string  `json:"imap_password"`
-	ClientID          string  `json:"client_id"`
-	RefreshToken      string  `json:"refresh_token"`
-	OTPURLPath        string  `json:"otp_url_path"`
-	LegacyDirectLink  string  `json:"legacy_direct_link_path,omitempty"`
-	CredentialMode    string  `json:"credential_mode,omitempty"`
-	CredentialVersion int64   `json:"credential_version"`
-	Enabled           bool    `json:"enabled"`
-	ConfiguredEnabled bool    `json:"configured_enabled"`
-	AccountEnabled    bool    `json:"account_enabled"`
-	LastSyncStatus    string  `json:"last_sync_status"`
-	LastSyncError     string  `json:"last_sync_error"`
-	LastSyncErrorLog  string  `json:"last_sync_error_log"`
-	LastSyncedAt      *string `json:"last_synced_at"`
-	LastAccessedAt    *string `json:"last_accessed_at"`
+	ID                         int64   `json:"id"`
+	AccountID                  int64   `json:"account_id"`
+	AccountEmail               string  `json:"account_email"`
+	Address                    string  `json:"address"`
+	Label                      string  `json:"label"`
+	GroupID                    *int64  `json:"group_id"`
+	GroupName                  string  `json:"group_name"`
+	APIKeyPrefix               string  `json:"api_key_prefix"`
+	DirectLinkPath             string  `json:"direct_link_path"`
+	APIKey                     string  `json:"api_key"`
+	IMAPPassword               string  `json:"imap_password"`
+	ClientID                   string  `json:"client_id"`
+	RefreshToken               string  `json:"refresh_token"`
+	OTPURLPath                 string  `json:"otp_url_path"`
+	LegacyDirectLink           string  `json:"legacy_direct_link_path,omitempty"`
+	CredentialMode             string  `json:"credential_mode,omitempty"`
+	CredentialVersion          int64   `json:"credential_version"`
+	Enabled                    bool    `json:"enabled"`
+	ConfiguredEnabled          bool    `json:"configured_enabled"`
+	AccountEnabled             bool    `json:"account_enabled"`
+	LastSyncStatus             string  `json:"last_sync_status"`
+	LastSyncError              string  `json:"last_sync_error"`
+	LastSyncErrorLog           string  `json:"last_sync_error_log"`
+	LastSyncedAt               *string `json:"last_synced_at"`
+	LastAccessedAt             *string `json:"last_accessed_at"`
 	LatestReceivedAt           *string `json:"latest_received_at"`
 	AutoRotateDurationMinutes  int     `json:"auto_rotate_duration_minutes"`
 	AutoRotateArmedAt          *string `json:"auto_rotate_armed_at"`
@@ -387,6 +387,7 @@ type adminAPICreateAliasRequest struct {
 
 type adminAPIUpdateAliasRequest struct {
 	Enabled *bool                 `json:"enabled"`
+	Label   *string               `json:"label"`
 	GroupID adminAPIOptionalInt64 `json:"group_id"`
 }
 
@@ -2135,8 +2136,12 @@ func (s *Server) adminAPIUpdateAlias(c *gin.Context) {
 	if !decodeAdminAPIJSON(c, &input) {
 		return
 	}
-	if input.Enabled == nil && !input.GroupID.Present {
+	if input.Enabled == nil && input.Label == nil && !input.GroupID.Present {
 		writeAdminAPIError(c, http.StatusBadRequest, "VALIDATION_FAILED", "请指定隐私邮箱状态或邮箱分组")
+		return
+	}
+	if input.Label != nil && utf8.RuneCountInString(strings.TrimSpace(*input.Label)) > 100 {
+		writeAdminAPIError(c, http.StatusBadRequest, "VALIDATION_FAILED", "用途备注不能超过 100 个字符")
 		return
 	}
 	alias, err := s.store.GetAlias(c.Request.Context(), id)
@@ -2153,6 +2158,7 @@ func (s *Server) adminAPIUpdateAlias(c *gin.Context) {
 		var updateErr error
 		alias, updateErr = s.store.UpdateAliasAdminState(c.Request.Context(), id, store.AliasAdminStateUpdate{
 			Enabled:        input.Enabled,
+			Label:          input.Label,
 			GroupID:        groupID,
 			GroupIDPresent: input.GroupID.Present,
 		})
@@ -2174,6 +2180,9 @@ func (s *Server) adminAPIUpdateAlias(c *gin.Context) {
 	}
 	session := mustSession(c)
 	action := "toggle"
+	if input.Label != nil {
+		action = "label"
+	}
 	if input.GroupID.Present {
 		action = "move_group"
 	}

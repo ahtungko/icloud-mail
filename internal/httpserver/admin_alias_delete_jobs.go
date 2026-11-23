@@ -22,6 +22,10 @@ const (
 	aliasDeletionJobLimit    = 2
 	aliasDeletionJobTimeout  = 2 * time.Hour
 	aliasDeletionSaveTimeout = 5 * time.Second
+	// Keep turnover conservative within one Apple account. This is deliberately
+	// an inter-alias delay; request-level pacing and Apple backoff remain owned
+	// by hmesync.
+	aliasDeletionItemInterval = 2 * time.Second
 )
 
 type aliasDeletionJobRuntime struct {
@@ -503,7 +507,9 @@ func (s *Server) runAliasDeletionJob(parent context.Context, job domain.AliasDel
 			item.Deleted = true
 		} else {
 			apiErr := adminAPIBatchAliasDeleteError(outcome.Err)
-			if ctx.Err() != nil && errors.Is(outcome.Err, ctx.Err()) {
+			if hmesync.Code(outcome.Err) == hmesync.CodeBatchNotStarted {
+				apiErr = adminAPIAppleError{Status: http.StatusConflict, Code: hmesync.CodeBatchNotStarted, Message: "任务在处理此邮箱前停止，未执行删除"}
+			} else if ctx.Err() != nil && errors.Is(outcome.Err, ctx.Err()) {
 				apiErr = adminAPIAppleError{
 					Status: http.StatusConflict, Code: "BATCH_DELETE_INTERRUPTED",
 					Message: "删除任务已停止或达到运行时限，请刷新 Apple 目录核对结果后再操作",
@@ -552,6 +558,7 @@ func (s *Server) runAliasDeletionJob(parent context.Context, job domain.AliasDel
 	ctx = hmesync.WithAliasDeletionRecovery(ctx, func(wait hmesync.AliasDeletionWait) {
 		s.recordAliasDeletionWait(waitIdentity, wait)
 	})
+	ctx = hmesync.WithAliasDeletionItemInterval(ctx, aliasDeletionItemInterval)
 	var outcomes []hmesync.AliasDeletionOutcome
 	var runErr error
 	if batch, ok := s.hmeSync.(HMEBatchDeletionService); ok {

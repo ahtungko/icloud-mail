@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"icloud-api/internal/domain"
@@ -111,5 +112,34 @@ func TestAdminAliasUpdateCanMovePendingAliasWhileKeepingItDisabled(t *testing.T)
 	if got.Enabled || got.GroupID == nil || *got.GroupID != group.ID ||
 		got.LastSyncError != domain.AppleAliasConfirmationPending {
 		t.Fatalf("pending alias after group move = %#v", got)
+	}
+}
+
+func TestAdminAliasUpdateLabelAndClear(t *testing.T) {
+	env := newAdminAPITestEnv(t)
+	cookie, csrf, _ := env.createSession(t, "label-admin", "label-password")
+	account := adminAPITestCreateAccount(t, env, "label-owner@icloud.com")
+	alias, err := env.store.CreateAlias(context.Background(), domain.Alias{AccountID: account.ID, Address: "label-alias@icloud.com", Label: "old", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/admin/api/v1/aliases/" + strconv.FormatInt(alias.ID, 10)
+	for _, value := range []any{"送人了", ""} {
+		response := env.request(t, http.MethodPatch, target, adminAPITestJSON(t, map[string]any{"label": value}), "application/json", []*http.Cookie{cookie}, csrf)
+		if response.Code != http.StatusOK {
+			t.Fatalf("label update status=%d body=%s", response.Code, response.Body.String())
+		}
+		got, readErr := env.store.GetAlias(context.Background(), alias.ID)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if got.Label != value {
+			t.Fatalf("label=%q want %q", got.Label, value)
+		}
+	}
+	tooLong := strings.Repeat("x", 101)
+	response := env.request(t, http.MethodPatch, target, adminAPITestJSON(t, map[string]any{"label": tooLong}), "application/json", []*http.Cookie{cookie}, csrf)
+	if response.Code != http.StatusBadRequest || adminAPITestErrorCode(t, response) != "VALIDATION_FAILED" {
+		t.Fatalf("long label status=%d body=%s", response.Code, response.Body.String())
 	}
 }

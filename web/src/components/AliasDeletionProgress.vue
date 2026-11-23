@@ -12,6 +12,7 @@
         :disabled="state.submitting"
         @click="$emit('refresh')"
       >刷新任务状态</el-button>
+      <el-button v-if="job?.results?.length" @click="downloadCsv">导出删除记录</el-button>
       <el-button
         v-if="job?.status === 'completed' || job?.status === 'interrupted'"
         text
@@ -75,6 +76,7 @@ import {
 } from "../utils/aliasDeletionJob.js";
 import { formatTime } from "../utils/format.js";
 import { createAliasDeletionVisibility } from "../utils/aliasDeletionVisibility.js";
+import { buildAliasDeletionCsv } from "../utils/aliasDeletionExport.js";
 
 const props = defineProps({ state: { type: Object, required: true } });
 defineEmits(["refresh", "acknowledge"]);
@@ -97,6 +99,16 @@ const statusLabel = computed(() => {
   if (waits.value.length) return "限流等待中";
   return { queued: "排队中", running: "执行中", completed: "已完成", interrupted: "已中断" }[job.value?.status] || "查询中";
 });
+function downloadCsv() {
+  const csv = "\uFEFF" + buildAliasDeletionCsv(job.value);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `alias-deletion-${job.value?.jobId || "job"}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 watch(() => job.value?.jobId, () => {
   resultsExpanded.value = false;
 });
