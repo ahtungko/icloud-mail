@@ -709,7 +709,7 @@ import { useAuth } from "../stores/auth.js";
 import SectionHeader from "../components/SectionHeader.vue";
 import RequestAlert from "../components/RequestAlert.vue";
 import AutoRotateDialog from "../components/AutoRotateDialog.vue";
-import { buildOTPDirectLink, copyText } from "../utils/clipboard.js";
+import { copyText } from "../utils/clipboard.js";
 import { buildAliasExportLine, buildAliasReceiveLink } from "../utils/aliasExport.js";
 import MailboxInboxDrawer from "../components/MailboxInboxDrawer.vue";
 import { createCheckboxDragSelection } from "../utils/checkboxDragSelection.js";
@@ -1571,7 +1571,7 @@ async function showCredentials(id) {
       imap_password: a.imap_password,
       client_id: a.client_id,
       refresh_token: a.refresh_token,
-      otp_url: otpPath ? buildOTPDirectLink(otpPath, location.origin) : "",
+      otp_url: otpPath ? buildAliasReceiveLink({ otpUrlPath: otpPath }, location.origin) : "",
     });
   });
 }

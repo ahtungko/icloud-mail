@@ -41,6 +41,23 @@ test("TXT export rejects missing or multiline addresses and invalid OTP paths", 
   }
 });
 
+test("project-isolated TXT requires a scoped link for every row, even when a root link exists", () => {
+  const row = {
+    address: "first@icloud.com",
+    otp_url_path: "/api/v1/otp?token=icm_root",
+    project_otp_url_path: "/api/v1/otp?token=icp_scoped",
+  };
+  const scoped = { preferProjectToken: true };
+  assert.equal(buildProjectMailboxExportText([row], origin, scoped),
+    `first@icloud.com-----${origin}/api/v1/otp?token=icp_scoped`);
+  for (const projectPath of [undefined, "", row.otp_url_path, "/api/v1/otp?token=icp_"]) {
+    const incomplete = { ...row, address: "second@icloud.com", project_otp_url_path: projectPath };
+    assert.throws(() => buildProjectMailboxExportText([row, incomplete], origin, scoped), /second@icloud\.com.*无法导出/);
+    assert.equal(buildProjectMailboxExportText([incomplete], origin),
+      `second@icloud.com-----${origin}/api/v1/otp?token=icm_root`);
+  }
+});
+
 test("download filename uses readable project and account names, stripping filename separators", () => {
   assert.equal(
     buildProjectMailboxFilename("项目 A / 主线", "owner@icloud.com"),

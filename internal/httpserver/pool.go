@@ -405,11 +405,13 @@ func (s *Server) writePoolCodeIfReady(c *gin.Context, v store.PoolLease, alias d
 		return true
 	}
 	filter := store.OTPQueryFilter{
-		After:         &after,
-		SenderFilter:  mergeQueryFilter(currentClient.SenderFilter, c.Query("sender")),
-		SubjectFilter: mergeQueryFilter(mergeQueryFilter(currentClient.SubjectFilter, c.Query("subject")), c.Query("keyword")),
-		Tag:           strings.TrimPrefix(strings.TrimSpace(c.Query("tag")), "+"),
-		Limit:         1,
+		After:                &after,
+		ProjectSenderFilter:  currentClient.SenderFilter,
+		ProjectSubjectFilter: currentClient.SubjectFilter,
+		SenderFilter:         c.Query("sender"),
+		SubjectFilter:        mergeQueryFilter(c.Query("subject"), c.Query("keyword")),
+		Tag:                  strings.TrimPrefix(strings.TrimSpace(c.Query("tag")), "+"),
+		Limit:                1,
 	}
 	if filter.Tag == "" {
 		if rawTo := strings.TrimSpace(c.Query("to")); rawTo != "" {

@@ -21,10 +21,16 @@ export function buildProjectMailboxExportText(mailboxes, origin = globalThis.loc
     if (typeof address !== "string" || !address.trim() || address !== address.trim() || /[\r\n]/.test(address)) {
       throw new TypeError("邮箱地址格式无效。");
     }
-    const rawPath = preferProjectToken && mailbox?.project_otp_url_path
+    const rawPath = preferProjectToken
       ? mailbox.project_otp_url_path
       : mailbox?.otp_url_path;
+    if (preferProjectToken && !rawPath) {
+      throw new TypeError(`邮箱 ${address} 缺少项目隔离取码链接，无法导出。`);
+    }
     const link = buildOTPDirectLink(rawPath, origin);
+    if (preferProjectToken && !/^icp_[A-Za-z0-9_-]+$/.test(new URL(link).searchParams.get("token"))) {
+      throw new TypeError(`邮箱 ${address} 的项目隔离取码令牌格式无效，无法导出。`);
+    }
     return `${address}-----${link}`;
   }).join("\r\n");
 }

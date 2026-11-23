@@ -20,8 +20,11 @@ type OTPQueryFilter struct {
 	After         *time.Time
 	SenderFilter  string
 	SubjectFilter string
-	Tag           string
-	Limit         int
+	// Project rules are mandatory in addition to the caller's optional filters.
+	ProjectSenderFilter  string
+	ProjectSubjectFilter string
+	Tag                  string
+	Limit                int
 }
 
 type DashboardAccountStats struct {
@@ -297,7 +300,10 @@ func (s *Store) ListAliasOTPsFiltered(
 	}
 	senderTokens := splitFilterTokens(filter.SenderFilter)
 	subjectTokens := splitFilterTokens(filter.SubjectFilter)
+	projectSenderTokens := splitFilterTokens(filter.ProjectSenderFilter)
+	projectSubjectTokens := splitFilterTokens(filter.ProjectSubjectFilter)
 	tag := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(filter.Tag, "+")))
+	hasProjectFilter := len(projectSenderTokens) > 0 || len(projectSubjectTokens) > 0
 	hasMetadataFilter := len(senderTokens) > 0 || len(subjectTokens) > 0 || tag != ""
 
 	afterTS := int64(0)
@@ -306,12 +312,12 @@ func (s *Store) ListAliasOTPsFiltered(
 		afterTS = timestamp(filter.After.UTC())
 	}
 
-	if !hasMetadataFilter && !hasAfter {
+	if !hasProjectFilter && !hasMetadataFilter && !hasAfter {
 		return s.ListAliasOTPs(ctx, aliasID, limit)
 	}
 
 	scanLimit := maxOTPHistory
-	if hasMetadataFilter {
+	if hasProjectFilter || hasMetadataFilter {
 		scanLimit = 300
 	}
 	query := `
@@ -343,6 +349,9 @@ func (s *Store) ListAliasOTPsFiltered(
 		if !domain.IsSixDigitOTP(otp) {
 			continue
 		}
+		if hasProjectFilter && !messageMatchesOTPFilter(rootAddress, fromJSON, toJSON, ccJSON, subject, projectSenderTokens, projectSubjectTokens, "") {
+			continue
+		}
 		if hasMetadataFilter && !messageMatchesOTPFilter(rootAddress, fromJSON, toJSON, ccJSON, subject, senderTokens, subjectTokens, tag) {
 			continue
 		}
@@ -365,7 +374,7 @@ func (s *Store) GetLatestAliasOTPFiltered(
 	rootAddress string,
 	filter OTPQueryFilter,
 ) (domain.OTPRecord, error) {
-	if filter.SenderFilter == "" && filter.SubjectFilter == "" && strings.TrimSpace(filter.Tag) == "" && filter.After != nil {
+	if filter.ProjectSenderFilter == "" && filter.ProjectSubjectFilter == "" && filter.SenderFilter == "" && filter.SubjectFilter == "" && strings.TrimSpace(filter.Tag) == "" && filter.After != nil {
 		return s.GetLatestAliasOTPAfter(ctx, aliasID, *filter.After)
 	}
 	filter.Limit = 1

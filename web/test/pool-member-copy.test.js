@@ -2,9 +2,37 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
+import { buildAliasReceiveLink } from "../src/utils/aliasExport.js";
 
 const source = readFileSync(new URL("../src/views/PoolView.vue", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const handler = source.match(/async function copyMemberOTP\(row\) \{[\s\S]*?\n\}/)[0];
+
+test("pool credentials display current, legacy and absent receive links", async () => {
+  const showCredentials = source.match(/async function showCredentials\(id\) \{[\s\S]*?\n\}/)[0];
+  const origin = "https://admin.example.test";
+  const legacyPath = "/api/v1/mail/recent?api_key=legacy";
+  const otpPath = "/api/v1/otp?token=current";
+  let alias, shown;
+  const state = {
+    location: { origin },
+    buildAliasReceiveLink,
+    attempt: (action) => action(),
+    request: async () => ({ alias }),
+    reveal: (_, credentials) => { shown = credentials; },
+  };
+  vm.runInNewContext(showCredentials, state);
+  for (const [paths, expected] of [
+    [{ otp_url_path: otpPath, direct_link_path: legacyPath }, origin + otpPath],
+    [{ otp_url_path: legacyPath, direct_link_path: legacyPath }, origin + legacyPath],
+    [{ direct_link_path: legacyPath }, origin + legacyPath],
+    [{}, ""],
+  ]) {
+    alias = { address: "mail@example.test", ...paths };
+    await state.showCredentials(1);
+    assert.equal(shown.otp_url, expected);
+    assert.equal(shown.email, alias.address);
+  }
+});
 
 function deferred() {
   let resolve, reject;

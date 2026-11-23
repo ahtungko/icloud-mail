@@ -310,6 +310,93 @@ func TestMultiProjectSharedMailboxFilterRateIsolationAndIndependentUnlink(t *tes
 	}
 }
 
+func TestOTPProjectRulesApplyToDirectLinksAndLeaseReads(t *testing.T) {
+	env := newAdminAPITestEnv(t)
+	env.server.sync = nil
+	ctx := context.Background()
+	f := newPoolDemandLease(t, env)
+	account, err := env.store.GetAccount(ctx, f.accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias, err := env.store.GetAlias(ctx, f.aliasID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := env.store.GetPoolLease(ctx, f.id, f.clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := lease.CreatedAt.Add(5 * time.Second)
+	env.server.now = func() time.Time { return now }
+	if err := env.store.ConfigureMailArchive(t.TempDir(), 2<<20); err != nil {
+		t.Fatal(err)
+	}
+	var messages []domain.ArchivedMessage
+	for i, sender := range []string{"allowed.test", "other.test"} {
+		code := []string{"111222", "333444"}[i]
+		messages = append(messages, domain.ArchivedMessage{
+			AccountID: account.ID, UIDValidity: 1, UID: uint32(i + 1),
+			InternalDate: lease.CreatedAt.Add(time.Duration(i+1) * time.Second),
+			From:         []domain.MailAddress{{Email: "mail@" + sender}},
+			To:           []domain.MailAddress{{Email: alias.Address}},
+			Subject:      sender, RawMIME: []byte("Subject: " + sender + "\r\n\r\n" + code),
+			OTP: code, AliasIDs: []int64{alias.ID},
+		})
+	}
+	if err := env.store.ApplyMailboxSync(ctx, account.ID, account.UpdatedAt, []domain.Alias{alias}, domain.MailboxSyncResult{
+		ArchivedMessages: messages,
+		State:            domain.IMAPSyncState{AccountID: account.ID, UIDValidity: 1, LastUID: 2, UpdatedAt: now},
+		Reset:            true,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	token, err := env.server.cipher.ProjectOTPToken(alias.ID, alias.APIKeyHash, f.clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := "/api/v1/otp?token=" + url.QueryEscape(token)
+	router, err := env.server.Router()
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(path string, headers map[string]string, want string) {
+		t.Helper()
+		now = now.Add(4 * time.Second)
+		r := serveV2Request(router, http.MethodGet, path, "", headers)
+		if r.Code != http.StatusOK || !strings.Contains(r.Body.String(), want) || strings.Contains(r.Body.String(), "333444") {
+			t.Fatalf("OTP response: status=%d body=%s want=%s", r.Code, r.Body.String(), want)
+		}
+	}
+	setRules := func(sender, subject string) {
+		t.Helper()
+		if _, err := env.store.UpdatePoolClientWithRules(ctx, f.clientID, true, false, &sender, &subject); err != nil {
+			t.Fatal(err)
+		}
+	}
+	leasePath := "/api/v1/pool/leases/" + f.id + "/code"
+	headers := map[string]string{"Authorization": "Bearer " + f.key}
+	for _, rule := range []struct{ sender, subject, query string }{
+		{"allowed.test", "", "sender=other.test"},
+		{"", "allowed.test", "keyword=other.test"},
+	} {
+		setRules(rule.sender, rule.subject)
+		check(direct+"&"+rule.query, nil, "[]")
+		check(leasePath+"?"+rule.query, headers, `"no_code"`)
+		check(leasePath, headers, "111222")
+	}
+
+	// Change the project before the first post-sync read of a long poll.
+	// Both messages met the project's old rules, only one meets the new rule.
+	setRules("", "")
+	env.server.SetSharedMailboxReceiver(func(context.Context, int64) error {
+		setRules("allowed.test", "")
+		return nil
+	})
+	env.server.SetMailboxChanges(func(int64) (<-chan struct{}, time.Duration) { return nil, 0 })
+	check(direct+"&wait_seconds=1", nil, "111222")
+}
+
 func TestAutoEnrollSkipsDirectoryImportsAndEnrollsNewAliasesImmediately(t *testing.T) {
 	env := newAdminAPITestEnv(t)
 	ctx := context.Background()

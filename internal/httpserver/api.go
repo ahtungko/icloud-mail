@@ -122,7 +122,12 @@ func (s *Server) otpHistory(c *gin.Context) {
 
 func (s *Server) writeOTPHistoryIfReady(c *gin.Context, reqCtx otpRequestContext, final bool) bool {
 	if reqCtx.ProjectID != "" {
-		if _, err := s.store.VerifyPoolProjectOTPAccess(c.Request.Context(), reqCtx.ProjectID, reqCtx.Binding.Alias.ID); err != nil {
+		// Serialize this local read with admin rule edits and unlink operations.
+		// Release the lock before the next long-poll wait.
+		s.poolMu.RLock()
+		defer s.poolMu.RUnlock()
+		project, err := s.store.VerifyPoolProjectOTPAccess(c.Request.Context(), reqCtx.ProjectID, reqCtx.Binding.Alias.ID)
+		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				s.writeAPIError(c, http.StatusUnauthorized, "INVALID_API_KEY", "项目取码凭据已失效或已解除共享")
 			} else {
@@ -131,6 +136,8 @@ func (s *Server) writeOTPHistoryIfReady(c *gin.Context, reqCtx otpRequestContext
 			}
 			return true
 		}
+		reqCtx.Filter.ProjectSenderFilter = project.SenderFilter
+		reqCtx.Filter.ProjectSubjectFilter = project.SubjectFilter
 	}
 	current, err := s.store.GetMailboxBindingByAPIKeyHash(c.Request.Context(), reqCtx.Binding.Alias.APIKeyHash)
 	if err != nil || !current.Alias.Enabled || !current.Account.Enabled ||
@@ -250,11 +257,7 @@ func (s *Server) authenticateOTPRequest(c *gin.Context) (otpRequestContext, bool
 		Binding:     binding,
 		ProjectID:   projectID,
 		PickupScope: pickupScope,
-		Filter: store.OTPQueryFilter{
-			SenderFilter:  project.SenderFilter,
-			SubjectFilter: project.SubjectFilter,
-			Limit:         100,
-		},
+		Filter:      store.OTPQueryFilter{Limit: 100},
 	}
 	if !s.parseOTPQueryModifiers(c, values, binding.Alias.Address, &reqCtx) {
 		return otpRequestContext{}, false
