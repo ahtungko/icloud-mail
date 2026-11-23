@@ -143,3 +143,31 @@ func TestAdminAliasUpdateLabelAndClear(t *testing.T) {
 		t.Fatalf("long label status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestAdminAliasUpdateLocalNoteAndClear(t *testing.T) {
+	env := newAdminAPITestEnv(t)
+	cookie, csrf, _ := env.createSession(t, "local-note-admin", "local-note-password")
+	account := adminAPITestCreateAccount(t, env, "local-note-owner@icloud.com")
+	alias, err := env.store.CreateAlias(context.Background(), domain.Alias{AccountID: account.ID, Address: "local-note-alias@icloud.com", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/admin/api/v1/aliases/" + strconv.FormatInt(alias.ID, 10)
+	for _, value := range []string{"送人了", ""} {
+		response := env.request(t, http.MethodPatch, target, adminAPITestJSON(t, map[string]any{"local_note": value}), "application/json", []*http.Cookie{cookie}, csrf)
+		if response.Code != http.StatusOK {
+			t.Fatalf("local note update status=%d body=%s", response.Code, response.Body.String())
+		}
+		got, readErr := env.store.GetAlias(context.Background(), alias.ID)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if got.LocalNote != value {
+			t.Fatalf("local_note=%q want %q", got.LocalNote, value)
+		}
+	}
+	response := env.request(t, http.MethodPatch, target, adminAPITestJSON(t, map[string]any{"local_note": strings.Repeat("x", 101)}), "application/json", []*http.Cookie{cookie}, csrf)
+	if response.Code != http.StatusBadRequest || adminAPITestErrorCode(t, response) != "VALIDATION_FAILED" {
+		t.Fatalf("long local note status=%d body=%s", response.Code, response.Body.String())
+	}
+}

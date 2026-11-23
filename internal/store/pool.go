@@ -59,6 +59,7 @@ type PoolMember struct {
 	AccountID int64     `json:"account_id"`
 	Address   string    `json:"address"`
 	Label     string    `json:"label"`
+	LocalNote string    `json:"local_note"`
 	GroupName string    `json:"group_name"`
 	State     string    `json:"state"`
 	Enabled   bool      `json:"enabled"`
@@ -496,7 +497,7 @@ func (s *Store) ListPoolMembers(ctx context.Context, state, search string, limit
 	if err := s.queryRowContext(ctx, `SELECT COUNT(*)`+where, args...).Scan(&page.Total); err != nil {
 		return page, err
 	}
-	rows, err := s.queryContext(ctx, `SELECT al.id,al.account_id,al.address,al.label,COALESCE(g.name,''),m.state,(al.enabled AND a.enabled),m.updated_at`+where+` ORDER BY al.id DESC LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+	rows, err := s.queryContext(ctx, `SELECT al.id,al.account_id,al.address,al.label,al.local_note,COALESCE(g.name,''),m.state,(al.enabled AND a.enabled),m.updated_at`+where+` ORDER BY al.id DESC LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
 		return page, err
 	}
@@ -504,7 +505,7 @@ func (s *Store) ListPoolMembers(ctx context.Context, state, search string, limit
 	for rows.Next() {
 		var v PoolMember
 		var at int64
-		if err := rows.Scan(&v.AliasID, &v.AccountID, &v.Address, &v.Label, &v.GroupName, &v.State, &v.Enabled, &at); err != nil {
+		if err := rows.Scan(&v.AliasID, &v.AccountID, &v.Address, &v.Label, &v.LocalNote, &v.GroupName, &v.State, &v.Enabled, &at); err != nil {
 			return page, err
 		}
 		v.UpdatedAt = time.Unix(0, at).UTC()

@@ -386,9 +386,10 @@ type adminAPICreateAliasRequest struct {
 }
 
 type adminAPIUpdateAliasRequest struct {
-	Enabled *bool                 `json:"enabled"`
-	Label   *string               `json:"label"`
-	GroupID adminAPIOptionalInt64 `json:"group_id"`
+	Enabled   *bool                 `json:"enabled"`
+	Label     *string               `json:"label"`
+	LocalNote *string               `json:"local_note"`
+	GroupID   adminAPIOptionalInt64 `json:"group_id"`
 }
 
 type adminAPIRotateAllCredentialsRequest struct {
@@ -2136,12 +2137,16 @@ func (s *Server) adminAPIUpdateAlias(c *gin.Context) {
 	if !decodeAdminAPIJSON(c, &input) {
 		return
 	}
-	if input.Enabled == nil && input.Label == nil && !input.GroupID.Present {
+	if input.Enabled == nil && input.Label == nil && input.LocalNote == nil && !input.GroupID.Present {
 		writeAdminAPIError(c, http.StatusBadRequest, "VALIDATION_FAILED", "请指定隐私邮箱状态或邮箱分组")
 		return
 	}
 	if input.Label != nil && utf8.RuneCountInString(strings.TrimSpace(*input.Label)) > 100 {
 		writeAdminAPIError(c, http.StatusBadRequest, "VALIDATION_FAILED", "用途备注不能超过 100 个字符")
+		return
+	}
+	if input.LocalNote != nil && utf8.RuneCountInString(strings.TrimSpace(*input.LocalNote)) > 100 {
+		writeAdminAPIError(c, http.StatusBadRequest, "VALIDATION_FAILED", "本地备注不能超过 100 个字符")
 		return
 	}
 	alias, err := s.store.GetAlias(c.Request.Context(), id)
@@ -2159,6 +2164,7 @@ func (s *Server) adminAPIUpdateAlias(c *gin.Context) {
 		alias, updateErr = s.store.UpdateAliasAdminState(c.Request.Context(), id, store.AliasAdminStateUpdate{
 			Enabled:        input.Enabled,
 			Label:          input.Label,
+			LocalNote:      input.LocalNote,
 			GroupID:        groupID,
 			GroupIDPresent: input.GroupID.Present,
 		})
@@ -2182,6 +2188,9 @@ func (s *Server) adminAPIUpdateAlias(c *gin.Context) {
 	action := "toggle"
 	if input.Label != nil {
 		action = "label"
+	}
+	if input.LocalNote != nil {
+		action = "local_note"
 	}
 	if input.GroupID.Present {
 		action = "move_group"

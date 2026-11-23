@@ -13,7 +13,7 @@ import (
 )
 
 const aliasColumns = `
-	al.id, al.account_id, ac.email, al.address, al.label,
+	al.id, al.account_id, ac.email, al.address, al.label, al.local_note,
 	al.group_id, COALESCE(mg.name, ''), al.api_key_hash,
 	al.api_key_prefix, al.credential_mode, al.credential_ciphertext, al.imap_password_hash,
 	al.oauth_client_id, al.refresh_token_hash, al.credential_version,
@@ -57,6 +57,7 @@ type AliasPage struct {
 type AliasAdminStateUpdate struct {
 	Enabled        *bool
 	Label          *string
+	LocalNote      *string
 	GroupID        *int64
 	GroupIDPresent bool
 }
@@ -184,7 +185,7 @@ func aliasCredentialMode(alias domain.Alias) (string, error) {
 func (s *Store) UpdateAlias(ctx context.Context, alias domain.Alias) (domain.Alias, error) {
 	label := strings.TrimSpace(alias.Label)
 	enabled := alias.Enabled
-	if err := s.updateAliasState(ctx, alias.ID, &label, &enabled, nil, false); err != nil {
+	if err := s.updateAliasState(ctx, alias.ID, &label, nil, &enabled, nil, false); err != nil {
 		return domain.Alias{}, fmt.Errorf("update alias: %w", err)
 	}
 	return s.getAliasAfterWrite(alias.ID)
@@ -468,7 +469,7 @@ func (s *Store) UpdateAliasSyncStatus(ctx context.Context, id int64, status, syn
 }
 
 func (s *Store) SetAliasEnabled(ctx context.Context, id int64, enabled bool) error {
-	if err := s.updateAliasState(ctx, id, nil, &enabled, nil, false); err != nil {
+	if err := s.updateAliasState(ctx, id, nil, nil, &enabled, nil, false); err != nil {
 		return fmt.Errorf("update alias state: %w", err)
 	}
 	return nil
@@ -482,13 +483,14 @@ func (s *Store) UpdateAliasAdminState(
 	id int64,
 	update AliasAdminStateUpdate,
 ) (domain.Alias, error) {
-	if update.Enabled == nil && update.Label == nil && !update.GroupIDPresent {
+	if update.Enabled == nil && update.Label == nil && update.LocalNote == nil && !update.GroupIDPresent {
 		return domain.Alias{}, errors.New("update alias admin state: no changes requested")
 	}
 	if err := s.updateAliasState(
 		ctx,
 		id,
 		update.Label,
+		update.LocalNote,
 		update.Enabled,
 		update.GroupID,
 		update.GroupIDPresent,
@@ -502,6 +504,7 @@ func (s *Store) updateAliasState(
 	ctx context.Context,
 	id int64,
 	label *string,
+	localNote *string,
 	enabled *bool,
 	groupID *int64,
 	groupIDPresent bool,
@@ -571,6 +574,11 @@ func (s *Store) updateAliasState(
 		*label = strings.TrimSpace(sanitizePostgresText(*label))
 		updates = append(updates, "label = ?")
 		args = append(args, *label)
+	}
+	if localNote != nil {
+		*localNote = strings.TrimSpace(sanitizePostgresText(*localNote))
+		updates = append(updates, "local_note = ?")
+		args = append(args, *localNote)
 	}
 	if enabled != nil {
 		updates = append(updates, "enabled = ?")
@@ -649,7 +657,7 @@ func scanAlias(scanner rowScanner) (domain.Alias, error) {
 	var autoRotateDurationSeconds int64
 	var createdAt, updatedAt int64
 	err := scanner.Scan(
-		&alias.ID, &alias.AccountID, &alias.AccountEmail, &alias.Address, &alias.Label,
+		&alias.ID, &alias.AccountID, &alias.AccountEmail, &alias.Address, &alias.Label, &alias.LocalNote,
 		&groupID, &alias.GroupName,
 		&alias.APIKeyHash, &alias.APIKeyPrefix, &alias.CredentialMode, &alias.CredentialCiphertext,
 		&alias.IMAPPasswordHash, &alias.OAuthClientID, &alias.RefreshTokenHash,

@@ -134,28 +134,29 @@ type Alias struct {
 	AccountDisabled bool
 	Address         string
 	Label           string
+	LocalNote       string
 	// GroupID and GroupName describe the optional administrator-defined
 	// mailbox group. A nil GroupID means that the alias is currently
 	// ungrouped; GroupName is populated by list/detail queries for display.
-	GroupID              *int64
-	GroupName            string
-	APIKeyHash           []byte
-	APIKeyPrefix         string
-	CredentialMode       string
-	CredentialCiphertext string
-	IMAPPasswordHash     []byte
-	OAuthClientID        string
-	RefreshTokenHash     []byte
-	CredentialVersion    int64
-	MailboxUIDValidity   uint32
-	MailboxUIDNext       uint32
-	Enabled              bool
-	LastSyncStatus       string
-	LastSyncError        string
-	LastSyncedAt         *time.Time
-	LastAccessedAt       *time.Time
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	GroupID                   *int64
+	GroupName                 string
+	APIKeyHash                []byte
+	APIKeyPrefix              string
+	CredentialMode            string
+	CredentialCiphertext      string
+	IMAPPasswordHash          []byte
+	OAuthClientID             string
+	RefreshTokenHash          []byte
+	CredentialVersion         int64
+	MailboxUIDValidity        uint32
+	MailboxUIDNext            uint32
+	Enabled                   bool
+	LastSyncStatus            string
+	LastSyncError             string
+	LastSyncedAt              *time.Time
+	LastAccessedAt            *time.Time
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
 	LatestReceivedAt          *time.Time
 	ReceiveRevision           int64      `json:"-"`
 	AutoRotateDurationSeconds int64      `json:"auto_rotate_duration_seconds"`

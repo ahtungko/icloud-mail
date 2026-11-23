@@ -116,7 +116,7 @@ func scanPendingAliasAPIKey(scanner rowScanner) (domain.PendingAliasAPIKey, erro
 	var autoRotateDurationSeconds int64
 	var createdAt, updatedAt, pendingCreatedAt int64
 	if err := scanner.Scan(
-		&alias.ID, &alias.AccountID, &alias.AccountEmail, &alias.Address, &alias.Label,
+		&alias.ID, &alias.AccountID, &alias.AccountEmail, &alias.Address, &alias.Label, &alias.LocalNote,
 		&groupID, &alias.GroupName,
 		&alias.APIKeyHash, &alias.APIKeyPrefix, &alias.CredentialMode, &alias.CredentialCiphertext,
 		&alias.IMAPPasswordHash, &alias.OAuthClientID, &alias.RefreshTokenHash,

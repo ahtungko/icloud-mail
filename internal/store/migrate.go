@@ -324,6 +324,7 @@ var schemaV2 = []string{
 		account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
 		address TEXT NOT NULL COLLATE NOCASE UNIQUE,
 		label TEXT NOT NULL DEFAULT '',
+		local_note TEXT NOT NULL DEFAULT '',
 		api_key_hash BLOB NOT NULL UNIQUE CHECK(length(api_key_hash) > 0),
 		api_key_prefix TEXT NOT NULL,
 		enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
@@ -726,6 +727,7 @@ func convergeSQLiteAliasCredentialMode(ctx context.Context, tx *sql.Tx) error {
 		{name: "auto_rotate_duration_seconds", definition: `INTEGER NOT NULL DEFAULT 0`},
 		{name: "auto_rotate_armed_at", definition: `INTEGER`},
 		{name: "auto_rotate_deadline", definition: `INTEGER`},
+		{name: "local_note", definition: `TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, column := range columns {
 		var present bool
@@ -961,6 +963,7 @@ var postgresAliasCredentialModeConvergence = []string{
 	`ALTER TABLE aliases ADD COLUMN IF NOT EXISTS auto_rotate_duration_seconds BIGINT NOT NULL DEFAULT 0`,
 	`ALTER TABLE aliases ADD COLUMN IF NOT EXISTS auto_rotate_armed_at BIGINT`,
 	`ALTER TABLE aliases ADD COLUMN IF NOT EXISTS auto_rotate_deadline BIGINT`,
+	`ALTER TABLE aliases ADD COLUMN IF NOT EXISTS local_note TEXT NOT NULL DEFAULT ''`,
 	`CREATE INDEX IF NOT EXISTS aliases_auto_rotate_deadline_idx
 		ON aliases(auto_rotate_deadline) WHERE auto_rotate_deadline IS NOT NULL`,
 }
@@ -1554,6 +1557,7 @@ var postgresSchemaV4 = []string{
 		account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
 		address CITEXT NOT NULL UNIQUE,
 		label TEXT NOT NULL DEFAULT '',
+		local_note TEXT NOT NULL DEFAULT '',
 		api_key_hash BYTEA NOT NULL UNIQUE CHECK(octet_length(api_key_hash) > 0),
 		api_key_prefix TEXT NOT NULL,
 		enabled BOOLEAN NOT NULL DEFAULT TRUE,

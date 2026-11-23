@@ -74,7 +74,7 @@
             <el-table-column type="selection" width="48" />
             <el-table-column prop="address" label="邮箱" min-width="245" />
             <el-table-column prop="group_name" label="分组" min-width="110" />
-            <el-table-column prop="label" label="用途备注" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="local_note" label="个人备注" min-width="140" show-overflow-tooltip />
             <el-table-column label="状态" width="135"
               ><template #default="{ row }"
                 ><el-tag :type="stateType(row.state)">{{
@@ -581,8 +581,8 @@ grant_type=refresh_token&amp;client_id=CLIENT_ID&amp;refresh_token=REFRESH_TOKEN
           ><el-button @click="secretOpen = false">关闭</el-button></template
         >
       </el-dialog>
-      <el-dialog v-model="bulkLabelOpen" title="批量标注用途备注" width="min(480px,94vw)" :close-on-click-modal="false" :show-close="!bulkLabelSaving" :close-on-press-escape="!bulkLabelSaving">
-        <p>将覆盖选中邮箱原有的用途备注；留空则清除备注。</p>
+      <el-dialog v-model="bulkLabelOpen" title="批量设置个人备注" width="min(480px,94vw)" :close-on-click-modal="false" :show-close="!bulkLabelSaving" :close-on-press-escape="!bulkLabelSaving">
+        <p>将覆盖选中邮箱原有的个人备注；留空则清除备注。</p>
         <el-input v-model="bulkLabelText" maxlength="100" show-word-limit placeholder="例如：送人了" :disabled="bulkLabelSaving" />
         <template #footer><el-button :disabled="bulkLabelSaving" @click="bulkLabelOpen = false">取消</el-button><el-button type="primary" :loading="bulkLabelSaving" @click="submitBulkLabel">保存</el-button></template>
       </el-dialog>
@@ -1270,12 +1270,12 @@ async function submitBulkLabel() {
   if (bulkLabelSaving.value || !memberSelected.value.length) return;
   const rows = [...memberSelected.value];
   const label = bulkLabelText.value.trim();
-  if ([...label].length > 100) { ElMessage.error("用途备注不能超过 100 个字符。"); return; }
+  if ([...label].length > 100) { ElMessage.error("个人备注不能超过 100 个字符。"); return; }
   bulkLabelSaving.value = true;
   const failed = [];
   try {
     for (const row of rows) {
-      try { await request(`/aliases/${encodeURIComponent(row.alias_id)}`, "PATCH", { label }); }
+      try { await request(`/aliases/${encodeURIComponent(row.alias_id)}`, "PATCH", { local_note: label }); }
       catch (e) { failed.push(`${row.address}: ${e?.message || "保存失败"}`); }
     }
     bulkLabelOpen.value = false;
