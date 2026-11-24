@@ -11,6 +11,7 @@ import {
 } from "../src/utils/clipboard.js";
 import { buildAliasExportLine } from "../src/utils/aliasExport.js";
 import { buildProjectMailboxExportText } from "../src/utils/projectMailboxExport.js";
+import { buildInboxShareLink } from "../src/utils/inbox.js";
 
 test("custom OTP domain applies to links and exports and can be cleared", (t) => {
   const data = new Map();
@@ -28,6 +29,7 @@ test("custom OTP domain applies to links and exports and can be cleared", (t) =>
   const path = "/api/v1/otp?token=derived_a%2Bb%2Fc";
   assert.equal(setOTPOrigin(" https://OTP.example.test/ "), "https://otp.example.test");
   assert.equal(buildOTPDirectLink(path, origin), `https://otp.example.test${path}`);
+  assert.equal(buildInboxShareLink("/inbox/view?token=icm_test", origin), "https://otp.example.test/inbox/view?token=icm_test");
   assert.equal(buildAliasExportLine({ address: "a@example.test", otpUrlPath: path }, "otp", origin), `a@example.test-----https://otp.example.test${path}`);
   assert.equal(buildProjectMailboxExportText([{ address: "a@example.test", otp_url_path: path }], origin), `a@example.test-----https://otp.example.test${path}`);
   assert.equal(buildRecentMailDirectLink("/api/v1/mail/recent?api_key=legacy", origin), `${origin}/api/v1/mail/recent?api_key=legacy`);
@@ -35,6 +37,7 @@ test("custom OTP domain applies to links and exports and can be cleared", (t) =>
   assert.equal(getOTPOrigin(origin), "https://otp.example.test");
   assert.equal(setOTPOrigin(" "), "");
   assert.equal(buildOTPDirectLink(path, origin), `${origin}${path}`);
+  assert.equal(buildInboxShareLink("/inbox/view?token=icm_test", origin), `${origin}/inbox/view?token=icm_test`);
   Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("denied"); } });
   assert.equal(buildOTPDirectLink(path, origin), `${origin}${path}`);
   assert.throws(() => setOTPOrigin("https://otp.example.test"), /denied/);

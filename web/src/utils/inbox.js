@@ -1,4 +1,5 @@
 import { formatTime } from "./format.js";
+import { getOTPOrigin } from "./clipboard.js";
 
 export const RECENT_INBOX_LOOKUPS_STORAGE_KEY = "icloud-admin-recent-inbox-lookups";
 export const MAX_RECENT_INBOX_LOOKUPS = 8;
@@ -231,9 +232,10 @@ export function buildSandboxedEmailSrcdoc(safeHtml, { dark = false } = {}) {
 }
 
 /**
- * Build a validated same-origin link for `/inbox/view?token=...` share paths.
+ * Build a validated link for `/inbox/view?token=...` share paths.
  */
 export function buildInboxShareLink(relativePath, origin = globalThis.location?.origin) {
+  origin = getOTPOrigin(origin);
   if (
     typeof relativePath !== "string" ||
     relativePath !== relativePath.trim() ||

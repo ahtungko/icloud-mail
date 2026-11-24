@@ -62,7 +62,7 @@
         </el-button>
       </div>
     </el-form>
-    <SectionHeader title="OTP 取码域名" description="仅保存在当前浏览器、当前后台域名下；留空时使用当前后台域名。请填写你控制且已配置 OTP 路由的 HTTPS 域名。" />
+    <SectionHeader title="OTP 取码域名" description="用于 OTP 取码和收件分享链接，仅保存在当前浏览器、当前后台域名下；留空时使用当前后台域名。请填写你控制且已配置相应路由的 HTTPS 域名。" />
     <el-form class="form-panel" label-position="top" @submit.prevent="saveOTPDomain">
       <el-form-item label="取码域名">
         <el-input v-model="otpDomain" placeholder="https://otp.example.com" />
