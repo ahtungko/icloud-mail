@@ -176,7 +176,7 @@ func (s *Service) retirementDirectory(ctx context.Context, accountID int64) (*al
 	if err := checkAccount(); err != nil {
 		return nil, err
 	}
-	if _, _, err := filterAliases(directory, account.Email); err != nil {
+	if _, _, err := filterAliases(directory, account); err != nil {
 		return nil, err
 	}
 	batch.directory = make(map[string]apple.Alias, len(directory.Aliases))

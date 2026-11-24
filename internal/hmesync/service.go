@@ -385,13 +385,13 @@ func (s *Service) SyncAliases(ctx context.Context, accountID int64) (SyncResult,
 	if err != nil {
 		return SyncResult{}, err
 	}
-	_, _, err = filterAliases(directory.list, account.Email)
+	_, _, err = filterAliases(directory.list, account)
 	if err != nil {
 		return SyncResult{}, err
 	}
-	directory, reconcileReady, reconcileErr := s.directoryForReconciliation(ctx, account, startedAt, directory)
+	directory, reconcileErr := s.directoryForReconciliation(ctx, account, startedAt, directory)
 	list, updated := directory.list, directory.web
-	filtered, inactive, err := filterAliases(list, account.Email)
+	filtered, inactive, err := filterAliases(list, account)
 	if err != nil {
 		return SyncResult{}, err
 	}
@@ -419,7 +419,6 @@ func (s *Service) SyncAliases(ctx context.Context, accountID int64) (SyncResult,
 	var webInfo SessionInfo
 	var directoryWarning string
 	var reviewedCount int
-	var removedCount int
 	if reconcileErr != nil {
 		directoryWarning = "APPLE_DIRECTORY_RECONCILIATION_PENDING"
 	}
@@ -457,17 +456,6 @@ func (s *Service) SyncAliases(ctx context.Context, accountID int64) (SyncResult,
 			if reviewErr != nil {
 				directoryWarning = "APPLE_CANDIDATE_REVIEW_PENDING"
 			}
-			if repo, ok := s.repo.(directoryReconcileRepository); ok && reconcileReady {
-				addresses := make([]string, 0, len(list.Aliases))
-				for _, remote := range list.Aliases {
-					addresses = append(addresses, remote.HME)
-				}
-				var cleanupErr error
-				removedCount, cleanupErr = repo.ReconcileAppleDirectory(ctx, account, startedAt, addresses)
-				if cleanupErr != nil {
-					directoryWarning = "APPLE_DIRECTORY_RECONCILIATION_PENDING"
-				}
-			}
 		}
 		return err
 	})
@@ -503,7 +491,6 @@ func (s *Service) SyncAliases(ctx context.Context, accountID int64) (SyncResult,
 			FilteredOutCount:      len(list.Aliases) - len(filtered),
 			DirectoryWarning:      directoryWarning,
 			ReviewedCount:         reviewedCount,
-			RemovedCount:          removedCount,
 		},
 		Created: created,
 		Session: webInfo,
@@ -1021,7 +1008,7 @@ func (s *Service) createAliasWithChannel(ctx context.Context, accountID int64, c
 			return domain.Alias{}, wrapError(CodeAliasConfirmationPending, ErrAliasConfirmationPending,
 				errors.New("Apple returned an inactive pending alias"))
 		}
-		if !sameEmail(confirmed.ForwardToEmail, account.Email) {
+		if !sameEmail(confirmed.ForwardToEmail, creationForwardingTarget(account)) {
 			return domain.Alias{}, wrapError(CodeAccountMismatch, ErrAccountMismatch, nil)
 		}
 		sessionRecord, err := s.autoCreateSessionRecord(accountID, record.AppleID, trustedDSID, validated.Region, returned)
@@ -1246,11 +1233,12 @@ func (s *Service) createAliasWithChannel(ctx context.Context, accountID int64, c
 			return domain.Alias{}, store.ErrAliasLimit
 		}
 	}
-	forwardingErr := validateAutoCreateForwardingTarget(settings, account.Email)
+	forwardingTarget := creationForwardingTarget(account)
+	forwardingErr := validateAutoCreateForwardingTarget(settings, forwardingTarget)
 	if errors.Is(forwardingErr, ErrForwardingTargetMissing) {
 		updater, canUpdate := s.client.(ForwardingTargetUpdater)
 		if !canUpdate || len(settings.Aliases) != 0 ||
-			!containsForwardingCandidate(settings.ForwardToEmails, account.Email) {
+			!containsForwardingCandidate(settings.ForwardToEmails, forwardingTarget) {
 			return domain.Alias{}, forwardingErr
 		}
 
@@ -1258,7 +1246,7 @@ func (s *Service) createAliasWithChannel(ctx context.Context, accountID int64, c
 			return domain.Alias{}, err
 		}
 		reportProgress(domain.AliasCreationPhaseInitializingForwarding, autoCreateInitializingForwardingPercent, 0)
-		updatedForwardingSession, updateErr := updater.UpdateForwardTo(appleCtx, listedSession, account.Email)
+		updatedForwardingSession, updateErr := updater.UpdateForwardTo(appleCtx, listedSession, forwardingTarget)
 		if !hasAppleSessionState(updatedForwardingSession) {
 			updatedForwardingSession = listedSession
 		}
@@ -1326,7 +1314,7 @@ func (s *Service) createAliasWithChannel(ctx context.Context, accountID int64, c
 		}
 		settings = verifiedSettings
 		listedSession = verifiedSession
-		forwardingErr = validateAutoCreateForwardingTarget(settings, account.Email)
+		forwardingErr = validateAutoCreateForwardingTarget(settings, forwardingTarget)
 		if callerErr := ctx.Err(); callerErr != nil {
 			return domain.Alias{}, callerErr
 		}
@@ -1491,7 +1479,7 @@ func (s *Service) createAliasWithChannel(ctx context.Context, accountID int64, c
 				errors.New("Apple returned an inactive reserved alias"),
 			)
 		}
-		if !sameEmail(created.ForwardToEmail, account.Email) {
+		if !sameEmail(created.ForwardToEmail, forwardingTarget) {
 			reportProgress(domain.AliasCreationPhaseConfirming, autoCreateConfirmingPercent, 1)
 			return domain.Alias{}, wrapError(CodeAccountMismatch, ErrAccountMismatch, nil)
 		}
@@ -1892,11 +1880,10 @@ func (s *Service) expireSession(ctx context.Context, accountID int64) {
 	})
 }
 
-func filterAliases(result apple.ListResult, accountEmail string) ([]apple.Alias, int, error) {
-	accountEmail = domain.NormalizeEmail(accountEmail)
-	belongs := sameEmail(result.SelectedForwardTo, accountEmail)
+func filterAliases(result apple.ListResult, account domain.Account) ([]apple.Alias, int, error) {
+	belongs := matchesAccountForwardingTarget(account, result.SelectedForwardTo)
 	for _, address := range result.ForwardToEmails {
-		belongs = belongs || sameEmail(address, accountEmail)
+		belongs = belongs || matchesAccountForwardingTarget(account, address)
 	}
 	seenAddresses := make(map[string]struct{}, len(result.Aliases))
 	seenRemoteIDs := make(map[string]struct{}, len(result.Aliases))
@@ -1922,7 +1909,7 @@ func filterAliases(result apple.ListResult, accountEmail string) ([]apple.Alias,
 			}
 			seenRemoteIDs[remoteID] = struct{}{}
 		}
-		if sameEmail(remote.ForwardToEmail, accountEmail) {
+		if matchesAccountForwardingTarget(account, remote.ForwardToEmail) {
 			belongs = true
 			remote.HME = address
 			filtered = append(filtered, remote)
@@ -2007,6 +1994,17 @@ func sameEmail(left, right string) bool {
 	left = domain.NormalizeEmail(left)
 	right = domain.NormalizeEmail(right)
 	return left != "" && left == right
+}
+
+func creationForwardingTarget(account domain.Account) string {
+	if domain.UsesForwardedICloudIMAP(account) && strings.TrimSpace(account.IMAPUsername) != "" {
+		return account.IMAPUsername
+	}
+	return account.Email
+}
+
+func matchesAccountForwardingTarget(account domain.Account, target string) bool {
+	return sameEmail(target, account.Email) || sameEmail(target, creationForwardingTarget(account))
 }
 
 func identityOf(account domain.Account) accountIdentity {

@@ -48,7 +48,7 @@ func (s *Service) reviewOldAccountCandidate(ctx context.Context, account domain.
 	if err != nil {
 		return false, nil, session, wrapError(CodeAliasConfirmationPending, ErrAliasConfirmationPending, mapAppleError(err, false))
 	}
-	if _, _, err := filterAliases(list, account.Email); err != nil {
+	if _, _, err := filterAliases(list, account); err != nil {
 		return false, nil, session, err
 	}
 	session.Account = &managed

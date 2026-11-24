@@ -612,7 +612,7 @@ func (b *aliasDeletionBatch) refreshDirectory(ctx context.Context, reconcile boo
 			return err
 		}
 	}
-	if _, _, err := filterAliases(directory, b.account.Email); err != nil {
+	if _, _, err := filterAliases(directory, b.account); err != nil {
 		return err
 	}
 	b.directory = make(map[string]apple.Alias, len(directory.Aliases))
@@ -625,7 +625,7 @@ func (b *aliasDeletionBatch) refreshDirectory(ctx context.Context, reconcile boo
 
 func (b *aliasDeletionBatch) find(address string) (apple.Alias, bool, error) {
 	remote, found := b.directory[domain.NormalizeEmail(address)]
-	if found && !sameEmail(remote.ForwardToEmail, b.account.Email) {
+	if found && !matchesAccountForwardingTarget(b.account, remote.ForwardToEmail) {
 		return apple.Alias{}, false, wrapError(CodeAccountMismatch, ErrAccountMismatch, nil)
 	}
 	return remote, found, nil

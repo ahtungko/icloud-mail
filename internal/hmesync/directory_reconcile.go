@@ -12,20 +12,18 @@ import (
 
 type directoryReconcileRepository interface {
 	ListAliasesByAccount(context.Context, int64) ([]domain.Alias, error)
-	ReconcileAppleDirectory(context.Context, domain.Account, time.Time, []string) (int, error)
 }
 
-// Consult the other complete directory only when a deletion would be needed.
-// A positive entry in either channel wins over absence in the other. Failure of
-// the cross-check disables cleanup for this sync, never becoming an empty list.
-func (s *Service) directoryForReconciliation(ctx context.Context, account domain.Account, startedAt time.Time, directory syncDirectory) (syncDirectory, bool, error) {
+// Supplement a partial listing with positive entries from the other channel.
+// An omitted address is never evidence for removing its local credentials.
+func (s *Service) directoryForReconciliation(ctx context.Context, account domain.Account, startedAt time.Time, directory syncDirectory) (syncDirectory, error) {
 	repo, ok := s.repo.(directoryReconcileRepository)
 	if !ok {
-		return directory, false, nil
+		return directory, nil
 	}
 	local, err := repo.ListAliasesByAccount(ctx, account.ID)
 	if err != nil {
-		return directory, false, err
+		return directory, err
 	}
 	addresses := make(map[string]bool, len(directory.list.Aliases))
 	for _, alias := range directory.list.Aliases {
@@ -42,32 +40,32 @@ func (s *Service) directoryForReconciliation(ctx context.Context, account domain
 		}
 	}
 	if !missing {
-		return directory, true, nil
+		return directory, nil
 	}
 	// A fallback means Web validation failed. Account absence alone must not
 	// erase an address which may still be positive in the unavailable channel.
 	if directory.fromAccount {
-		return directory, false, ErrSessionExpired
+		return directory, ErrSessionExpired
 	}
 	if _, ok := s.client.(accountDirectoryLister); !ok {
-		return directory, true, nil
+		return directory, nil
 	}
 	if _, ok := s.repo.(accountSessionRepository); !ok {
-		return directory, true, nil
+		return directory, nil
 	}
 	managed, err := s.readAccountManagementSession(ctx, account.ID)
 	if errors.Is(err, store.ErrNotFound) || Code(err) == CodeAccountSessionExpired || err == nil && (managed == nil || managed.RefreshRejected) {
-		return directory, true, nil
+		return directory, nil
 	}
 	if err != nil {
-		return directory, false, err
+		return directory, err
 	}
 	secondary, err := s.readAccountDirectoryForSync(ctx, account, ErrLoginRequired)
 	if err != nil {
-		return directory, false, err
+		return directory, err
 	}
-	if _, _, err := filterAliases(secondary.list, account.Email); err != nil {
-		return directory, false, err
+	if _, _, err := filterAliases(secondary.list, account); err != nil {
+		return directory, err
 	}
 	merged := directory
 	merged.list.Aliases = append([]apple.Alias(nil), directory.list.Aliases...)
@@ -78,8 +76,8 @@ func (s *Service) directoryForReconciliation(ctx context.Context, account domain
 			addresses[address] = true
 		}
 	}
-	if _, _, err := filterAliases(merged.list, account.Email); err != nil {
-		return directory, false, err
+	if _, _, err := filterAliases(merged.list, account); err != nil {
+		return directory, err
 	}
-	return merged, true, nil
+	return merged, nil
 }

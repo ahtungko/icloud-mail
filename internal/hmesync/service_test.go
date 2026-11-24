@@ -174,7 +174,7 @@ func TestVerificationRejectsIMAPUsernameChangeDuringAppleRequest(t *testing.T) {
 func TestSyncFiltersByForwardingMailboxAndReturnsOnlyNewAliases(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC)
-	repo := newFakeRepository(domain.Account{ID: 3, Email: "Primary@icloud.com"}, now)
+	repo := newFakeRepository(domain.Account{ID: 3, Email: "Primary@icloud.com", IMAPUsername: "receiver@gmail.com"}, now)
 	locker := &fakeLocker{}
 	client := &fakeAppleClient{}
 	client.validate = func(_ context.Context, session apple.Session) (apple.Session, error) {
@@ -185,10 +185,10 @@ func TestSyncFiltersByForwardingMailboxAndReturnsOnlyNewAliases(t *testing.T) {
 	client.list = func(_ context.Context, session apple.Session) (apple.ListResult, apple.Session, error) {
 		assertNetworkOutsideAccountLock(t, locker)
 		return apple.ListResult{
-			SelectedForwardTo: "elsewhere@example.com",
+			SelectedForwardTo: "receiver@gmail.com",
 			ForwardToEmails:   []string{"primary@icloud.com", "elsewhere@example.com"},
 			Aliases: []apple.Alias{
-				{AnonymousID: "one", HME: "NEW@icloud.com", ForwardToEmail: "primary@icloud.com", IsActive: true, Label: " New "},
+				{AnonymousID: "one", HME: "NEW@icloud.com", ForwardToEmail: "receiver@gmail.com", IsActive: true, Label: " New "},
 				{AnonymousID: "two", HME: "old@icloud.com", ForwardToEmail: "PRIMARY@ICLOUD.COM", IsActive: false},
 				{AnonymousID: "three", HME: "other@icloud.com", ForwardToEmail: "elsewhere@example.com", IsActive: true},
 			},
@@ -295,6 +295,26 @@ func TestCreateAutoAliasChecksSelectedForwardBeforeReserve(t *testing.T) {
 	stored, decryptErr := service.decryptSession(repo.mustSession(t, 3))
 	if decryptErr != nil || stored.SessionToken != "rotated-by-forwarding-preflight" {
 		t.Fatalf("rotated preflight session was not preserved: session=%#v err=%v", stored, decryptErr)
+	}
+}
+
+func TestCreateAliasWithForwardedIMAP(t *testing.T) {
+	now := time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC)
+	repo := newFakeRepository(domain.Account{ID: 3, Email: "primary@icloud.com", IMAPUsername: "receiver@gmail.com", Enabled: true}, now)
+	client := &fakeAppleClient{
+		validate: func(_ context.Context, session apple.Session) (apple.Session, error) { return session, nil },
+		list: func(_ context.Context, session apple.Session) (apple.ListResult, apple.Session, error) {
+			return apple.ListResult{SelectedForwardTo: "receiver@gmail.com", ForwardToEmails: []string{"receiver@gmail.com"}}, session, nil
+		},
+		create: func(_ context.Context, session apple.Session, _, _ string) (apple.Alias, apple.Session, error) {
+			return apple.Alias{HME: "new@icloud.com", ForwardToEmail: "receiver@gmail.com", IsActive: true}, session, nil
+		},
+	}
+	service := newTestService(t, repo, client, &fakeLocker{}, func() time.Time { return now })
+	storeSession(t, service, repo, 3, apple.Session{AppleID: "owner@example.com", Region: apple.RegionGlobal})
+	alias, err := service.CreateAlias(context.Background(), 3)
+	if err != nil || alias.Address != "new@icloud.com" {
+		t.Fatalf("create with Gmail forwarding: alias=%#v err=%v", alias, err)
 	}
 }
 
@@ -2222,6 +2242,27 @@ func TestDeleteAliasReconcilesAmbiguousPermanentDeleteOutcome(t *testing.T) {
 	}
 }
 
+func TestDeleteAliasWithForwardedIMAP(t *testing.T) {
+	now := time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC)
+	repo := newFakeRepository(domain.Account{ID: 3, Email: "primary@icloud.com", IMAPUsername: "receiver@gmail.com", Enabled: true}, now)
+	repo.addAlias(domain.Alias{ID: 41, AccountID: 3, Address: "alias@icloud.com", Enabled: true})
+	client := &fakeAppleClient{
+		validate: func(_ context.Context, session apple.Session) (apple.Session, error) { return session, nil },
+		list: func(_ context.Context, session apple.Session) (apple.ListResult, apple.Session, error) {
+			return apple.ListResult{SelectedForwardTo: "receiver@gmail.com", Aliases: []apple.Alias{{AnonymousID: "target-id", HME: "alias@icloud.com", ForwardToEmail: "receiver@gmail.com"}}}, session, nil
+		},
+		deleteRemote: func(_ context.Context, session apple.Session, _ string) (apple.Session, error) { return session, nil },
+	}
+	service := newTestService(t, repo, client, &fakeLocker{}, func() time.Time { return now })
+	storeSession(t, service, repo, 3, apple.Session{AppleID: "owner@example.com", Region: apple.RegionGlobal})
+	if err := service.DeleteAlias(context.Background(), 41); err != nil {
+		t.Fatalf("delete with Gmail forwarding: %v", err)
+	}
+	if repo.hasAlias(41) || client.deleteCalls.Load() != 1 {
+		t.Fatal("confirmed Apple deletion was not reflected locally")
+	}
+}
+
 func TestDeleteAliasRejectsTargetForwardedToAnotherMailbox(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC)
@@ -2377,7 +2418,7 @@ func TestFilterAliasesRejectsDuplicateAddress(t *testing.T) {
 			{HME: "DUP@icloud.com", AnonymousID: "one", ForwardToEmail: "primary@icloud.com"},
 			{HME: "dup@icloud.com", AnonymousID: "two", ForwardToEmail: "primary@icloud.com"},
 		},
-	}, "primary@icloud.com")
+	}, domain.Account{Email: "primary@icloud.com"})
 	if !errors.Is(err, ErrUpstream) || Code(err) != CodeUpstreamError {
 		t.Fatalf("duplicate directory error = %v code=%q", err, Code(err))
 	}

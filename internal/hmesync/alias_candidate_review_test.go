@@ -19,8 +19,8 @@ type reviewCandidateClient struct {
 
 type failingDirectoryReconcileStore struct{ *store.Store }
 
-func (f failingDirectoryReconcileStore) ReconcileAppleDirectory(context.Context, domain.Account, time.Time, []string) (int, error) {
-	return 0, context.Canceled
+func (f failingDirectoryReconcileStore) ListAliasesByAccount(context.Context, int64) ([]domain.Alias, error) {
+	return nil, errors.New("local directory unavailable")
 }
 
 func TestDirectoryReconciliationFailureKeepsImportedCredentials(t *testing.T) {
@@ -34,7 +34,7 @@ func TestDirectoryReconciliationFailureKeepsImportedCredentials(t *testing.T) {
 	s.repo = failingDirectoryReconcileStore{db}
 	result, err := s.SyncAliases(context.Background(), account.ID)
 	if err != nil || len(result.Created) != 2 || result.Summary.DirectoryWarning != "APPLE_DIRECTORY_RECONCILIATION_PENDING" {
-		t.Fatalf("import result lost after reconciliation failure: created=%d err=%v", len(result.Created), err)
+		t.Fatalf("import after reconciliation failure: created=%d warning=%q err=%v", len(result.Created), result.Summary.DirectoryWarning, err)
 	}
 	for _, created := range result.Created {
 		if created.APIKey == "" {
