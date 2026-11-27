@@ -65,6 +65,7 @@
             <el-button :disabled="!bulkRotateEligibleCount || copyingMemberOTP || bulkRotateSaving" @click="openBulkRotate">批量自动轮换（{{ bulkRotateEligibleCount }}）</el-button>
           </div>
           <div class="pool-table-scroll" role="region" aria-label="邮箱库存列表" tabindex="0"><el-table
+            ref="memberTable"
             :data="members.items"
             v-loading="loading"
             class="pool-table"
@@ -719,6 +720,7 @@ import { PROJECT_OTP_PRESETS, describeProjectRule, normalizeFilterTokens } from 
 const auth = useAuth();
 const copyingMemberOTP = ref(false);
 const memberSelected = ref([]);
+const memberTable = ref(null);
 const bulkLabelOpen = ref(false), bulkLabelSaving = ref(false), bulkLabelText = ref("");
 const memberOTPSelected = computed(() => memberSelected.value.filter(isMemberOTPAvailable));
 const bulkRotateOpen = ref(false), bulkRotateSaving = ref(false), bulkRotateOption = ref(30), bulkRotateCustom = ref(30);
@@ -922,7 +924,7 @@ async function attempt(fn) {
     return undefined;
   }
 }
-async function loadMembers(signal) {
+async function loadMembers(signal, { preserveSelection = false } = {}) {
   const ticket = ++memberReadTicket;
   await attempt(async () => {
     const result = await request(
@@ -934,7 +936,16 @@ async function loadMembers(signal) {
           offset: (memberPage.value - 1) * 50,
         }), "GET", undefined, signal instanceof AbortSignal ? signal : undefined,
     );
-    if (ticket === memberReadTicket) members.value = result;
+    if (ticket !== memberReadTicket) return;
+    const selectedIds = new Set(preserveSelection ? memberSelected.value.map((row) => row.alias_id) : []);
+    members.value = result;
+    if (preserveSelection) {
+      await nextTick();
+      if (ticket !== memberReadTicket) return;
+      for (const row of result.items || []) {
+        if (selectedIds.has(row.alias_id)) memberTable.value?.toggleRowSelection(row, true);
+      }
+    }
   });
 }
 async function loadLeases(signal) {
@@ -1498,7 +1509,7 @@ async function submitBulkLabel() {
       catch (e) { failed.push(`${row.address}: ${e?.message || "保存失败"}`); }
     }
     bulkLabelOpen.value = false;
-    await loadMembers();
+    await loadMembers(undefined, { preserveSelection: true });
     if (failed.length) await ElMessageBox.alert(`成功 ${rows.length - failed.length} 个，失败 ${failed.length} 个。\n${failed.join("\n")}`, "批量标注结果", { type: "warning", customClass: "bulk-rotate-result" });
     else ElMessage.success(`已标注 ${rows.length} 个邮箱。`);
   } finally { bulkLabelSaving.value = false; }
